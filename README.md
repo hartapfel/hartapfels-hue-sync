@@ -175,6 +175,8 @@ Version 0.6.5 migrates an existing cold-boot preference when the app is first op
 
 Version 0.6.6 keeps the scheduled callback open until the streaming service takes over and bounds the capture status check to five seconds. In a C9 test with setup closed before the scheduled callback, Direct TV capture started, the Hue worker connected on UDP port 2100, and the capture count advanced by 376 frames in 12.56 seconds. A later 5.04-second sample of that session counted 152 frames. At 100 kernel ticks per second, native capture used 92 CPU ticks (18.3% of one core) and the Hue worker used seven (1.4%). These figures cover just the two native processes.
 
+On a fresh LG C9 boot with 0.6.6, setup stayed closed. The deferred callback arrived at 70.87 seconds of uptime, and the Hue worker confirmed the first send at 72.54 seconds. Direct capture reached 454 frames by 86.55 seconds, and the owner observed the lights start. The configured 40-second delay follows the TV's core boot signal.
+
 Both inputs wait for a captured frame before requesting the Hue area. Network and video startup retries back off to 30 seconds. If another app owns the entertainment area, Screen Sync reports the conflict.
 
 The desktop comparisons cover the ordinary video effect and mixer. Comparing the same HDR source from capture through to a physical light is also pending. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)
