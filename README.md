@@ -1,6 +1,6 @@
 # C9 Screen Sync
 
-This standalone webOS project is porting the video path from the locally installed Hue Sync Desktop 1.13.1.83. The target is an LG C9 using local video capture and a Hue Entertainment area. The current build produces processing and Hue streaming libraries and an ARM video capture checker.
+This standalone webOS project is porting the video path from the locally installed Hue Sync Desktop 1.13.1.83. The target is an LG C9 using local video capture and a Hue Entertainment area. The test IPK includes a TV setup screen, a webOS service and an ARM video capture and streaming worker.
 
 ## Desktop comparisons
 
@@ -90,5 +90,7 @@ python package.py --ares-js /path/to/ares-cli/bin/ares-package.js
 ```
 
 The packaging script checks the app and service manifests, ARM payloads, executable mode and release metadata before saving the IPK in `build/ipk`. Its inputs include Mbed TLS and the Zig runtime licenses. The TV setup screen and service use LG's JS service packaging model. [LG JS service guide](https://webostv.developer.lge.com/develop/guides/js-service-usage)
+
+**Start sync on power-on** is off by default. Enabling it checks access to the TV's power state before registering a persistent webOS activity. A fresh service handles cold boot. During Quick Start standby, it listens for the panel to wake, then requests the selected area. The service releases its session on standby. The local lifecycle tests exercise both paths with simulated webOS responses. A real cold boot and remote-control wake are required to confirm the C9 firmware delivers those callbacks. [LG Activity Manager](https://webostv.developer.lge.com/develop/references/activity-manager)
 
 End-to-end comparisons still need the effect inputs to the mixer, black-bar handling and HDR capture behavior. Live pairing with a dedicated app identity, live bridge output, measured capture cost and boot and standby recovery still require device tests. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)

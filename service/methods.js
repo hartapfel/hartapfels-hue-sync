@@ -32,10 +32,15 @@ module.exports = function register(service, app, session) {
             });
         });
     }
-    add('status', app.status);
+    var boot = require('./autostart')(service, app, session, start);
+    add('status', function () { return app.status().then(function (s) {
+        if (!s.error) s.error = boot.error();
+        return s;
+    }); });
     add('pair', function (params) { return app.pair(params.host); });
     add('areas', app.areas);
     add('select', function (params) { return app.select(params.id); });
     add('start', start);
-    add('stop', app.stop);
+    add('stop', function () { boot.manualStop(); return app.stop(); });
+    add('setAutoStart', function (params) { return boot.set(params.enabled); });
 };

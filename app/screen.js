@@ -38,6 +38,9 @@
         el('sync').disabled = pending || !(live || (idle && s.area));
         el('pair').disabled = el('host').disabled = pending || !idle;
         el('reload').disabled = pending || !idle || !s.paired;
+        el('boot').disabled = pending || (!s.autoStart && !s.area);
+        el('boot').setAttribute('aria-pressed', String(!!s.autoStart));
+        el('boot').textContent = 'Start sync on power-on · ' + (s.autoStart ? 'On' : 'Off');
         el('pairHelp').textContent = s.bridge ? 'Paired with ' + s.bridge.name + ' (' + s.bridge.host + ').' :
             'Press the link button on your Hue Bridge, then choose Pair bridge.';
         if (s.bridge && s.bridge.host !== lastBridge) {
@@ -84,6 +87,9 @@
         }, el('pair'));
     };
     el('reload').onclick = function () { action(reload, el('reload')); };
+    el('boot').onclick = function () {
+        action(function () { return call('setAutoStart', {enabled: !state.autoStart}).then(update); }, el('boot'));
+    };
     el('sync').onclick = function () {
         var method = state.state === 'streaming' ? 'stop' : 'start';
         action(function () { return call(method).then(function () { return call('status'); }).then(update); }, el('sync'));

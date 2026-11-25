@@ -8,14 +8,14 @@ module.exports = function controller(hue, store, session) {
     function status() {
         var state = session.status();
         return { state: state.state, error: state.error, bridge: settings.bridge || null,
-            paired: Boolean(settings.keys), area: settings.area || null };
+            paired: Boolean(settings.keys), area: settings.area || null, autoStart: settings.autoStart === true };
     }
     function commit(next) {
         return store.save(next).then(function () { settings = next; return status(); });
     }
-    function edit(fn) {
+    function edit(fn, allowStreaming) {
         return loaded.then(function () {
-            if (writing || session.status().state !== 'idle') throw Error('Setup is busy.');
+            if (writing || (!allowStreaming && session.status().state !== 'idle')) throw Error('Setup is busy.');
             writing = true;
             return Promise.resolve().then(fn).then(function (result) {
                 writing = false;
@@ -34,7 +34,8 @@ module.exports = function controller(hue, store, session) {
                 return hue.identify(host).then(function (bridge) {
                     return hue.pair(bridge).then(function (keys) {
                         var same = settings.bridge && settings.bridge.id === bridge.id;
-                        return commit({ version: 1, bridge: bridge, keys: keys, area: same ? settings.area : null });
+                        return commit({ version: 1, bridge: bridge, keys: keys, area: same ? settings.area : null,
+                            autoStart: settings.autoStart === true, bootRegistration: settings.bootRegistration });
                     });
                 });
             });
@@ -44,9 +45,24 @@ module.exports = function controller(hue, store, session) {
             return edit(function () {
                 return client().layout(id).then(function (area) {
                     return commit({ version: 1, bridge: settings.bridge, keys: settings.keys,
-                        area: { id: area.id, name: area.name } });
+                        area: { id: area.id, name: area.name }, autoStart: settings.autoStart === true,
+                        bootRegistration: settings.bootRegistration });
                 });
             });
+        },
+        acceptsBoot: function (registration) {
+            return loaded.then(function () {
+                return settings.autoStart === true && typeof registration === 'string' &&
+                    registration === settings.bootRegistration;
+            });
+        },
+        setAutoStart: function (enabled, registration) {
+            return edit(function () {
+                if (typeof enabled !== 'boolean') throw Error('Choose a startup setting.');
+                if (enabled && !settings.area) throw Error('Select an entertainment area first.');
+                return commit({version: 1, bridge: settings.bridge, keys: settings.keys,
+                    area: settings.area, autoStart: enabled, bootRegistration: enabled ? registration : undefined});
+            }, true);
         },
         start: function () {
             return loaded.then(function () {

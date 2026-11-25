@@ -9,7 +9,9 @@
       {"name": "areas", "public": true},
       {"name": "select", "public": true},
       {"name": "start", "public": true},
-      {"name": "stop", "public": true}
+      {"name": "stop", "public": true},
+      {"name": "setAutoStart", "public": true},
+      {"name": "onPowerOn", "public": true}
     ]
   }]
 }
