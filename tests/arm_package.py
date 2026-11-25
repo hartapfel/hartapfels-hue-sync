@@ -16,7 +16,7 @@ import tempfile
 from hdr_chart import PATCHES, yuv10
 from worker_loopback import AREA, IDENTITY, ROOT, FIRST_SPLIT_RECORDS
 sys.path.insert(0, str(ROOT))
-from package import archive
+from package import BACKEND, archive
 
 
 class Initramfs:
@@ -89,8 +89,10 @@ def add_runtime(vm, assets, runtime):
 def add_fixture(vm, temp, args):
     vm.add("fixture", mode=stat.S_IFDIR | 0o755)
     vm.add("app", mode=stat.S_IFDIR | 0o755)
+    vm.add("capture-fixture", mode=stat.S_IFDIR | 0o755)
+    vm.add("capture-fixture/" + BACKEND, args.test_backend.read_bytes(), stat.S_IFREG | 0o755)
     with tarfile.open(fileobj=io.BytesIO(archive(args.ipk)["data.tar.gz"])) as tar:
-        for filename in ("c9-sync", "libc9_hue_stream.so", "worker-session.js"):
+        for filename in ("c9-sync", "libc9_hue_stream.so", "worker-session.js", BACKEND):
             item, = [m for m in tar if m.name.endswith(".service/" + filename)]
             content = tar.extractfile(item).read()
             if filename.endswith(".js"):
@@ -116,12 +118,15 @@ def add_fixture(vm, temp, args):
 
     packet("register", "Register", {"origin": "ARM VM", "priority": 150})
     expected = [[round(c/4) for c in yuv10(p)] for p in PATCHES]
-    y_plane, uv_plane = [], []
+    y_plane, uv_plane, uv_422 = [], [], []
     for y in range(64):
         row = expected[(y//16)*6:(y//16+1)*6]
         y_plane.extend([p[0] for p in row for _ in range(16)] + [250]*6)
+        chroma = [c for p in row for _ in range(8) for c in p[1:]] + [250]*6
+        uv_422.extend(chroma)
         if y % 2 == 0:
-            uv_plane.extend([c for p in row for _ in range(8) for c in p[1:]] + [250]*6)
+            uv_plane.extend(chroma)
+    vm.add("fixture/direct.nv16", bytes(y_plane + uv_422))
     image("chart", "NV12Image", {"stride_y": 102, "stride_uv": 102, "data_y": y_plane, "data_uv": uv_plane})
     image("split", "RawImage", {"data": ([255, 0, 0]*48 + [0, 0, 255]*48)*64})
     image("white", "NV12Image", {"data_y": [235]*6144, "data_uv": [128]*3072})
@@ -132,8 +137,9 @@ def add_fixture(vm, temp, args):
 
 def verify(log, expected):
     assert "C9-ARM-PASSED" in log, log[-3000:]
-    report = json.loads(next(s for s in log.splitlines() if s.startswith('{"chart"')))
-    assert (report["format"], report["frames"], report["patches"]) == ("NV12", 8, expected)
+    reports = [json.loads(s) for s in log.splitlines() if s.startswith('{"chart"')]
+    assert [(r["format"], r["frames"], r["patches"]) for r in reports] == [
+        ("NV16", 8, expected), ("NV12", 8, expected)]
     block = re.search(r"C9-PACKETS-BEGIN\s+([A-Za-z0-9+/=\s]+?)\s+C9-PACKETS-END", log)
     assert block, "Guest did not report the decrypted stream"
     packets = base64.b64decode("".join(block[1].split()), validate=True)
@@ -148,13 +154,15 @@ def verify(log, expected):
         frames.append((r, g, b, rr, gg, bb))
     assert len(frames) >= 15 and any(r > b and bb > rr for r, g, b, rr, gg, bb in frames)
     assert min(frames[-1][1], frames[-1][4]) > 5000
-    print(f"Packaged ARM worker measured all 24 patches and delivered {len(frames)} decrypted two-channel frames.")
+    print(f"All 24 direct NV16 fixture and PicCap NV12 patches matched. "
+          f"The packaged worker delivered {len(frames)} decrypted two-channel frames.")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("ipk", "assets", "qemu", "flatc", "schema", "runtime"):
         parser.add_argument(name, type=Path)
+    parser.add_argument("--test-backend", type=Path, default=ROOT / "build/arm/libc9-test-capture-backend.so")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(dir=ROOT / "build") as work:
         temp = Path(work)

@@ -64,12 +64,8 @@ int c9_capture_video(const struct capture_settings *settings, capture_callback c
         !settings->height || settings->height > 16384 || !settings->fps || settings->fps > 60 ||
         (unsigned)settings->matrix > YUV_BT2020_NCL || (unsigned)settings->range > YUV_FULL)
         return -1;
-    // webOS installs developer packages under /media/developer/apps. A bundled
-    // copy on the service's normal library path is also supported.
-    void *library = dlopen("/media/developer/apps/usr/palm/services/"
-                           "org.webosbrew.piccap.service/libdile_vt_backend.so",
-                           RTLD_NOW | RTLD_LOCAL);
-    if (!library) library = dlopen("libdile_vt_backend.so", RTLD_NOW | RTLD_LOCAL);
+    // The capture backend is installed beside the worker in its own service.
+    void *library = dlopen("$ORIGIN/libdile_vt_backend.so", RTLD_NOW | RTLD_LOCAL);
     if (!library) {
         fprintf(stderr, "C9 video backend: %s\n", dlerror());
         return -1;

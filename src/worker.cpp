@@ -184,7 +184,7 @@ int stream_video(Video& video, hue_stream *stream) {
 }
 }
 
-int measure_piccap_chart(capture_cancelled interrupted);
+int measure_hdr_chart(bool direct, capture_cancelled interrupted);
 
 int main(int argc, char **argv) {
     signal(SIGTERM, stop);
@@ -194,8 +194,11 @@ int main(int argc, char **argv) {
 #elif defined(_WIN32)
     _setmode(_fileno(stdin), _O_BINARY);
 #endif
-    if (argc == 2 && std::strcmp(argv[1], "--measure-hdr-chart") == 0)
-        return measure_piccap_chart(cancelled);
+    if (argc >= 2 && std::strcmp(argv[1], "--measure-hdr-chart") == 0) {
+        if (argc == 2) return measure_hdr_chart(false, cancelled);
+        if (argc == 3 && std::strcmp(argv[2], "direct") == 0) return measure_hdr_chart(true, cancelled);
+        return 2;
+    }
     if (argc != 1) return 2;
     Session session;
     if (!read_session(session)) {

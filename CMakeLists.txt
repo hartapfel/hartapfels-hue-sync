@@ -25,6 +25,9 @@ endif()
 
 set(PICCAP_SOURCE_DIR "" CACHE PATH "hyperion-webos source tree providing the video backend ABI headers")
 if(PICCAP_SOURCE_DIR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_library(c9-test-capture-backend SHARED EXCLUDE_FROM_ALL tests/direct_backend.c)
+  target_include_directories(c9-test-capture-backend PRIVATE
+    "${PICCAP_SOURCE_DIR}/unicapture" "${PICCAP_SOURCE_DIR}/src")
   add_executable(c9-capture-check src/capture_check.c src/capture.c ${processing_sources})
   target_include_directories(c9-capture-check PRIVATE
     "${PICCAP_SOURCE_DIR}/unicapture" "${PICCAP_SOURCE_DIR}/src")
@@ -67,7 +70,7 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm")
   set(relocation_script "${CMAKE_CURRENT_SOURCE_DIR}/cmake/webos-relocations.ld")
-  foreach(target IN ITEMS c9-sync c9_hue_stream c9-capture-check)
+  foreach(target IN ITEMS c9-sync c9_hue_stream c9-capture-check c9-test-capture-backend)
     if(TARGET ${target})
       target_link_options(${target} PRIVATE "LINKER:-T,${relocation_script}")
       set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${relocation_script}")

@@ -12,6 +12,8 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parent
+BACKEND = "libdile_vt_backend.so"
+BACKEND_SHA256 = "2bc6a61c497ad147c8ad12071adae5423cbe2c2921aa6671df68e56d77b937ef"
 
 
 def archive(path):
@@ -45,7 +47,7 @@ def verify(package, app, service, appid, version):
                     assert json.loads(content) == json.loads(entry.read_bytes()), entry.name
                 else:
                     assert content == entry.read_bytes(), entry.name
-                if entry.name in ("c9-sync", "libc9_hue_stream.so"):
+                if entry.name in ("c9-sync", "libc9_hue_stream.so", BACKEND):
                     assert content[:6] == b"\x7fELF\x01\x01" and struct.unpack_from("<H", content, 18)[0] == 40
                 if entry.name == "c9-sync":
                     assert item.mode & 0o111 == 0o111, oct(item.mode)
@@ -67,6 +69,7 @@ def main():
     parser.add_argument("--mbedtls", type=Path, default=ROOT / "build/mbedtls-3.6.7")
     parser.add_argument("--zig-lib", type=Path, default=ROOT / "build/zig-toolchain/ziglang/lib")
     parser.add_argument("--flatbuffers", type=Path, default=ROOT / "build/flatbuffers-595bf0007ab1929570c7671f091313c8fc20644e")
+    parser.add_argument("--piccap-ipk", type=Path, default=ROOT / "build/piccap-0.5.3.ipk")
     parser.add_argument("--output", type=Path, default=ROOT / "build/ipk")
     args = parser.parse_args()
     info = json.loads((ROOT / "app/appinfo.json").read_bytes())
@@ -78,6 +81,12 @@ def main():
         service = Path(shutil.copytree(ROOT / "service", work / "service"))
         for name in ("c9-sync", "libc9_hue_stream.so"):
             shutil.copyfile(args.arm / name, service / name)
+        with tarfile.open(fileobj=io.BytesIO(archive(args.piccap_ipk)["data.tar.gz"])) as data:
+            member = "usr/palm/services/org.webosbrew.piccap.service/" + BACKEND
+            backend = data.extractfile(member).read()
+            if hashlib.sha256(backend).hexdigest() != BACKEND_SHA256:
+                raise ValueError("Expected the DILE backend from the PicCap 0.5.3 release")
+            (service / BACKEND).write_bytes(backend)
         shutil.copyfile(args.mbedtls / "LICENSE", service / "LICENSE-mbedTLS.txt")
         shutil.copyfile(args.flatbuffers / "LICENSE", service / "LICENSE-FlatBuffers.txt")
         for name in ("libcxx", "libcxxabi", "libunwind"):

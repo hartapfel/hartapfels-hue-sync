@@ -1,6 +1,6 @@
 {
   "id": "org.webosbrew.c9screensync",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "vendor": "Independent homebrew",
   "title": "C9 Screen Sync",
   "main": "index.html",

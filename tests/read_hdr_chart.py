@@ -19,7 +19,7 @@ def reference(patch, layout, limited):
 def summarize(report):
     layout = report["format"]
     patches = report["patches"]
-    if (layout not in ("RGB24", "NV12") or report["chart"] != "c9-hdr10-v1" or
+    if (layout not in ("RGB24", "NV12", "NV16") or report["chart"] != "c9-hdr10-v1" or
             report["frames"] != 8 or len(patches) != len(PATCHES) or
             any(len(p) != 3 or any(type(code) not in (int, float) or not 0 <= code <= 255 for code in p)
                 for p in patches)):

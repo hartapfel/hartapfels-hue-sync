@@ -19,6 +19,13 @@ test_package() {
     grep -q '/sdk/libc.so.6' sdk.list && grep -q '/app/libc9_hue_stream.so' sdk.list || return 1
     /app/c9-sync </dev/null 2>invalid.err
     [ "$?" = 2 ] && grep -q 'Invalid screen sync session' invalid.err || return 1
+    # The guest has no LG display libraries. The failure must name a firmware
+    # dependency, proving the installed worker found its own real DILE backend.
+    /app/c9-sync --measure-hdr-chart direct >missing.out 2>missing.err
+    [ "$?" = 1 ] && grep -Eq 'C9 video backend: lib(PmLogLib|dile_vt)\.so' missing.err || return 1
+    cp /app/c9-sync /app/libc9_hue_stream.so /capture-fixture/ || return 1
+    /capture-fixture/c9-sync --measure-hdr-chart direct >direct.out 2>direct.err || return 1
+    cat direct.out
     /app/c9-sync --measure-hdr-chart >chart.out 2>chart.err &
     child=$!
     wait_port || return 1

@@ -47,7 +47,7 @@
         });
         el('sourceHelp').textContent = s.source === 'piccap' ?
             'In PicCap, turn off Unix socket mode and send video to 127.0.0.1 on port 19401. Leave PicCap capture running.' :
-            s.source === 'direct' ? 'Pause PicCap capture before starting direct TV capture.' : '';
+            s.source === 'direct' ? 'If PicCap is capturing, pause it so this app can use the TV capture device.' : '';
         el('pairHelp').textContent = s.bridge ? 'Paired with ' + s.bridge.name + ' (' + s.bridge.host + ').' :
             'Press the link button on your Hue Bridge, then choose Pair bridge.';
         if (s.bridge && s.bridge.host !== lastBridge) {

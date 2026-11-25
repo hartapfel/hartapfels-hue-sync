@@ -29,7 +29,8 @@ int finished(void *context) {
 Pixel raw_pixel(const capture_bitmap& frame, unsigned x, unsigned y) {
     const auto *line = frame.pixels.data + frame.pixels.stride * y;
     if (frame.layout == RGB24) return {line[3*x], line[3*x+1], line[3*x+2]};
-    const auto *uv = frame.chroma.data + (y/2) * frame.chroma.stride + (x/2) * 2;
+    unsigned chroma_y = frame.layout == NV12 ? y/2 : y;
+    const auto *uv = frame.chroma.data + chroma_y * frame.chroma.stride + (x/2) * 2;
     return {line[x], uv[0], uv[1]};
 }
 
@@ -40,7 +41,8 @@ bool close_codes(const Pixel& a, const Pixel& b, int tolerance) {
 }
 
 bool sample(const capture_bitmap& frame, Chart& values) {
-    if ((frame.layout != RGB24 && frame.layout != NV12) || frame.width < 48 || frame.height < 32)
+    if ((frame.layout != RGB24 && frame.layout != NV12 && frame.layout != NV16) ||
+        frame.width < 48 || frame.height < 32)
         return false;
     for (unsigned i = 0; i < values.size(); ++i) {
         unsigned x = (2 * (i % 6) + 1) * frame.width / 12;
@@ -83,7 +85,8 @@ int observe(const capture_bitmap *frame, void *context) {
         for (unsigned c = 0; c < 3; ++c) p.sum[i][c] += current[i][c];
     if (++p.count < 8) return 0;
     std::printf("{\"chart\":\"c9-hdr10-v1\",\"width\":%u,\"height\":%u,\"format\":\"%s\","
-                "\"frames\":%u,\"patches\":[", p.width, p.height, p.layout == RGB24 ? "RGB24" : "NV12", p.count);
+                "\"frames\":%u,\"patches\":[", p.width, p.height,
+                p.layout == RGB24 ? "RGB24" : (p.layout == NV16 ? "NV16" : "NV12"), p.count);
     for (unsigned i = 0; i < p.sum.size(); ++i) {
         const auto& s = p.sum[i];
         std::printf("%s[%.3f,%.3f,%.3f]", i ? "," : "", s[0]/8., s[1]/8., s[2]/8.);
@@ -94,13 +97,15 @@ int observe(const capture_bitmap *frame, void *context) {
 }
 }
 
-int measure_piccap_chart(capture_cancelled interrupted) {
+int measure_hdr_chart(bool direct, capture_cancelled interrupted) {
     Probe probe{};
     probe.interrupted = interrupted;
     probe.deadline = Clock::now() + std::chrono::seconds(90);
-    std::fputs("Waiting up to 90 seconds for the HDR10 chart from PicCap on localhost:19401\n", stderr);
-    capture_settings settings{};
-    int result = c9_receive_piccap(&settings, observe, &probe, finished);
+    std::fprintf(stderr, "Waiting for the HDR10 chart from %s\n",
+                 direct ? "direct TV capture" : "PicCap on localhost:19401");
+    capture_settings settings{256, 144, 30, YUV_BT709, YUV_LIMITED};
+    auto source = direct ? c9_capture_video : c9_receive_piccap;
+    int result = source(&settings, observe, &probe, finished);
     if (!probe.complete) std::fputs("No stable HDR10 chart measurement received\n", stderr);
     return result == 0 && probe.complete ? 0 : 1;
 }

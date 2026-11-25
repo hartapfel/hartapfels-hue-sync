@@ -50,6 +50,8 @@ setImmediate(function () {
             return rejects(app.start(), /Select/);
         }).then(function () { return app.areas(); })
         .then(function (areas) { assert.deepEqual(areas, [room]); return app.select(room.id); })
+        .then(function (s) { assert.equal(s.source, 'direct'); return app.setSource('piccap'); })
+        .then(function () { return controller(hue, store, session).status(); })
         .then(function (s) { assert.equal(s.source, 'piccap'); return app.setSource('direct'); })
         .then(function () { return rejects(app.setSource('invalid'), /Unknown/); })
         .then(function () { return app.start(); })

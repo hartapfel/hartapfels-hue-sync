@@ -6,7 +6,7 @@ module.exports = function controller(hue, store, session) {
     var settings, writing = false;
     var loaded = store.load().then(function (value) {
         settings = value;
-        if (!settings.source) settings.source = settings.keys ? 'direct' : 'piccap';
+        if (!settings.source) settings.source = 'direct';
     });
     function status() {
         var state = session.status();

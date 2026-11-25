@@ -34,8 +34,8 @@ PicCap's TCP image messages carry dimensions, pixel data and optional plane stri
 
 Generate the 15-second HEVC Main 10 chart with `python tests/hdr_chart.py ffmpeg build/c9-hdr10-chart.mp4` and an FFmpeg build with 10-bit libx265. It contains a marker row, twelve gray patches from black through 1,000 cd/m², and six BT.2020 color patches. The generator decodes the file and checks all patch centers at three timestamps. The PQ reference and narrow-range encoding follow [ITU-R BT.2100](https://www.itu.int/rec/R-REC-BT.2100).
 
-1. Stop standalone sync. Point PicCap at TCP `127.0.0.1:19401`. Use the HDMI or player input under investigation and play the chart full-screen with HDR10 output. The C9 should indicate HDR playback.
-2. In a Dev Manager TV terminal, change into the installed `org.webosbrew.c9screensync.service` directory and run `./c9-sync --measure-hdr-chart`. The worker waits up to 90 seconds. Loop the clip if needed. This mode opens the PicCap receiver and works without Hue credentials.
+1. Stop standalone sync. For direct capture, pause any other app using the capture device. For PicCap input, point PicCap at TCP `127.0.0.1:19401`. Play the chart full-screen on the input under investigation and check the C9 indicates HDR playback.
+2. In a Dev Manager TV terminal, change into the installed `org.webosbrew.c9screensync.service` directory. Run `./c9-sync --measure-hdr-chart direct` for direct capture, or `./c9-sync --measure-hdr-chart` for PicCap. Both modes work without a Hue connection. Loop the clip if needed.
 3. Save its single JSON output line on the PC and run `python tests/read_hdr_chart.py measurement.json`. It lists raw gray values and reports deviations from unmodified full- and limited-range PQ for the gray and color patches. Agreement supports that interpretation for that playback path. A large residual requires further investigation of capture or playback processing.
 
 The worker samples five interior points per tile, requires the marker and eight stable frames, and reports raw RGB or Y/Cb/Cr averages before matrix conversion or sync grading. The local test decodes the generated clip, sends RGB24 and padded NV12 through the PicCap protocol, interrupts a run of seven chart frames with a blank frame, and checks all 24 triples for both formats.
@@ -49,7 +49,7 @@ python tests/desktop_video.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Rele
 python tests/desktop_bars.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/c9-capture-check
 ```
 
-The checker takes a capture width, height, frame rate, frame count, Y′CbCr matrix and range. It reports frame dimensions and strides, sample count, processing time across all 14 regions, and their final RGB targets. A live run requires the TV's existing video backend and exclusive use of capture. Windows and emulated ARM both passed 39 capture-plane comparisons, 1,296 frame-to-target cases, and 343 room-position checks against the desktop EDK's cuboid membership routine. Boundary points can belong to multiple cuboids.
+The checker takes a capture width, height, frame rate, frame count, Y′CbCr matrix and range. It reports frame dimensions and strides, sample count, processing time across all 14 regions, and their final RGB targets. For a live run, place the capture checker beside the packaged `libdile_vt_backend.so` and release any competing capture session. Windows and emulated ARM both passed 39 capture-plane comparisons, 1,296 frame-to-target cases, and 343 room-position checks against the desktop EDK's cuboid membership routine. Boundary points can belong to multiple cuboids.
 
 ## Hue Entertainment stream
 
@@ -98,7 +98,7 @@ node tests/session.js
 
 ### Running the packaged ARM worker
 
-`tests/arm_package.py` extracts the worker, streaming library and session encoder from the IPK. It boots an isolated ARMv7 QEMU guest with loopback networking, feeds the worker PicCap frames, and decrypts the resulting two-channel Hue stream. It checks all 24 chart patches, channel IDs, sequence numbers, and the first red/blue channel records against the desktop renderer and serializer.
+`tests/arm_package.py` extracts the worker, capture backend, streaming library and session encoder from the IPK. In an isolated ARMv7 QEMU guest, the worker locates the real backend and reports its missing LG firmware dependency. A separate test backend supplies padded NV16 planes through the native capture ABI. The worker acquires and releases eight frames and measures all 24 chart patches. The guest also feeds PicCap NV12 and RGB frames, decrypts the resulting two-channel Hue stream, and checks channel IDs, sequence numbers and the first red/blue records against the desktop renderer and serializer.
 
 The fixture uses these files in `build/arm-vm`:
 
@@ -107,7 +107,8 @@ The fixture uses these files in `build/arm-vm`:
 * Supply a Debian armel libc6 package as the final argument for the execution test. Both 2.13-38+deb7u10 and 2.24-11+deb9u4 passed the chart and DTLS tests. Running directly against all SDK 2.12.2 libraries in this guest ended during library initialization, so startup on C9 firmware still needs a device test. [Debian eglibc archive](https://archive.debian.org/debian/pool/main/e/eglibc/) · [Debian glibc archive](https://archive.debian.org/debian/pool/main/g/glibc/)
 
 ```powershell
-python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.3.3_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb
+cmake --build build/arm --target c9-test-capture-backend
+python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.3.4_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb
 ```
 
 The service's bridge client identifies a bridge by its certificate and bridge ID, pairs via its link button, and reads the selected Entertainment area's channel IDs and three-dimensional positions. It checks the active application before requesting start or stop. Pairing and ownership transitions are covered by the local fixture, `node tests/bridge.js`, which also runs on Node 0.12.2. A read-only check on a BSB003 bridge imported all 12 channels of the selected area. Each position matched a single desktop preset cuboid. The certificate check also passed on Windows with the C9-generation Node runtime. The public roots come from the pair documented by OpenHue. [OpenHue bridge roots](https://github.com/openhue/openhue-go/blob/main/certs.go) · [LG service runtime versions](https://webostv.developer.lge.com/develop/guides/js-service-basics)
@@ -116,9 +117,11 @@ The service's bridge client identifies a bridge by its certificate and bridge ID
 
 The C9 Screen Sync app has its own webOS package ID, private pairing storage and background service. Enter the bridge IP, press the bridge link button, pair, then choose an existing Entertainment area. Release HyperHDR's Hue stream before choosing Start sync. Closing the setup screen leaves the session running. Reopen the app to stop it.
 
-**PicCap stream** is the default input for new setups. In PicCap, use TCP, address `127.0.0.1`, port `19401`, and leave capture running. To switch back to HyperHDR, restore PicCap's prior destination. The receiver listens only on the TV loopback interface while starting or syncing. It accepts PicCap's RGB24 and NV12 frames, including padded Y and UV strides. With **Direct TV capture**, pause PicCap first. This option needs the installed DILE backend and permission to access its capture device. Paired installations of the previous version retain direct capture until another input is selected.
+**Direct TV capture** is the default for a fresh setup. The service loads its own DILE backend and requests 256 × 144 at 30 fps. It needs access to the firmware capture device. Pause any competing capture session before starting. Existing installations keep their saved input.
 
-After compiling the ARM worker, run the following from this repository with the official ares CLI entry point:
+For **PicCap stream**, use TCP, address `127.0.0.1`, port `19401`, and leave PicCap capture running. To switch back to HyperHDR, restore PicCap's prior destination. The receiver listens only on the TV loopback interface while starting or syncing and accepts PicCap's RGB24 and NV12 frames, including padded Y and UV strides.
+
+Download the official PicCap 0.5.3 IPK to `build/piccap-0.5.3.ipk` or pass its path with `--piccap-ipk`. The packager extracts only the MIT-licensed capture backend, verifies its digest and includes its copyright notice. After compiling the ARM worker, run the following with the official ares CLI entry point. [PicCap 0.5.3](https://github.com/TBSniller/piccap/releases/tag/0.5.3)
 
 ```powershell
 python package.py --ares-js /path/to/ares-cli/bin/ares-package.js
