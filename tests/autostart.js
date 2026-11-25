@@ -29,8 +29,23 @@ var app = {
     acceptsBoot: function (id) { return Promise.resolve(config.enabled && registration === id); },
     setAutoStart: function (enabled, id) { config.enabled = enabled; registration = id; return app.status(); }
 };
-var session = { stop: function () { ++stops; live = false; return app.status(); } };
-function init(start) { return create(service, app, session, start || function () { ++starts; live = true; return app.status(); }); }
+var ended, end;
+function streaming() {
+    live = true;
+    ended = new Promise(function (resolve) { end = resolve; });
+    return app.status();
+}
+function finish(reason) {
+    live = false;
+    if (end) end(reason || {state: 'idle', error: null});
+    end = null;
+    return app.status();
+}
+var session = {
+    whenEnded: function () { return ended || app.status(); },
+    stop: function () { ++stops; return finish(); }
+};
+function init(start) { return create(service, app, session, start || function () { ++starts; return streaming(); }); }
 function fire(id) {
     callback({sender: 'com.webos.service.activitymanager', payload: {$activity: {activityId: 10}, registration: id},
         respond: function () { ++responds; }});
@@ -52,7 +67,7 @@ function lateWake() {
     function restore() { global.setTimeout = set; global.clearTimeout = clear; }
     var boot = init(function () {
         ++attempts;
-        if (!failure) { live = true; return app.status(); }
+        if (!failure) return streaming();
         var err = Error(failure); err.code = failure; return Promise.reject(err);
     });
     config.enabled = true; registration = 'saved'; live = false;
@@ -69,6 +84,17 @@ function lateWake() {
         }).then(function () { failure = null; return power('Active', 'on'); })
         .then(function () {
             assert(live); assert.equal(attempts, 7);
+            // Reconnect the power subscription while the stream is healthy.
+            // A single later video loss must schedule exactly one fresh start.
+            sub.cancel(); return advance(15000);
+        }).then(function () { return power('Active', 'on'); })
+        .then(function () { return finish({state:'idle', errorCode:'VIDEO_NOT_READY', error:'PicCap disconnected'}); })
+        .then(function () { return later(); })
+        .then(function () {
+            assert(boot.waiting()); assert.equal(boot.error(), 'PicCap disconnected');
+            return advance(2000);
+        }).then(function () {
+            assert(live); assert.equal(attempts, 8);
             return power('Active', 'off', 'Prepare Suspend');
         }).then(function () {
             assert(!live); failure = 'ETIMEDOUT'; return power('Active', 'on');
@@ -76,10 +102,10 @@ function lateWake() {
             assert(boot.waiting()); boot.manualStop(); assert(!timer); assert(!boot.waiting());
             sub.cancel(); return advance(15000);
         }).then(function () { return power('Active', 'on'); })
-        .then(function () { assert.equal(attempts, 8); return power('Suspend'); })
+        .then(function () { assert.equal(attempts, 9); return power('Suspend'); })
         .then(function () { failure = 'AREA_BUSY'; return power('Active'); })
         .then(function () {
-            assert(!timer); assert.equal(attempts, 9); assert.equal(boot.error(), 'AREA_BUSY');
+            assert(!timer); assert.equal(attempts, 10); assert.equal(boot.error(), 'AREA_BUSY');
             return boot.set(false);
         });
     return checks.then(restore, function (err) { restore(); throw err; });
@@ -101,7 +127,8 @@ setImmediate(function () {
     }).then(function () { return power('Active'); }).then(function () { return power('Active'); })
         .then(function () {
             assert.equal(starts, 1); assert.equal(stops, 1);
-            boot.manualStop(); live = false;
+            boot.manualStop(); return finish();
+        }).then(function () {
             return power('Active');
         }).then(function () {
             assert.equal(starts, 1);

@@ -77,6 +77,19 @@ function tests() {
                 assert.equal(failed.session.status().state, 'idle');
             });
         }).then(function () {
+            var runningChild;
+            var interrupted = fixture(available, function (child) { runningChild = child; ready(child); });
+            return interrupted.start().then(function () {
+                var ended = interrupted.session.whenEnded();
+                runningChild.stderr.write('PicCap input disconnected\n');
+                runningChild.emit('close', 1);
+                return ended;
+            }).then(function (end) {
+                assert.equal(end.state, 'idle');
+                assert.equal(end.errorCode, 'VIDEO_NOT_READY');
+                assert.equal(interrupted.released, 1);
+            });
+        }).then(function () {
             var failed = fixture(available, ready, function () { return Promise.reject(Error('Bridge unavailable')); });
             return rejected(failed.start(), /Bridge unavailable/).then(function () {
                 assert.equal(failed.launched, 0);

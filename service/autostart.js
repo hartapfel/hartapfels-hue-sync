@@ -22,17 +22,29 @@ module.exports = function autoStart(service, app, session, start) {
     }
     function onActive(token, attempt) {
         if (!owner || !active || suppressed || generation !== token) return;
+        function followStream() {
+            return session.whenEnded().then(function (end) {
+                // Source changes can interrupt PicCap or HDMI after the first
+                // successful send. The session settles after releasing the area.
+                if (end.errorCode === 'VIDEO_NOT_READY') {
+                    var err = Error(end.error);
+                    err.code = end.errorCode;
+                    throw err;
+                }
+            });
+        }
         app.status().then(function (s) {
             if (!owner || !active || generation !== token || !s.autoStart || !s.area) return;
             if (s.state === 'stopping') return session.whenEnded().then(function () { onActive(token, attempt); });
             // A replacement power subscription can arrive before the original
             // start has settled. The new watcher inherits that attempt.
-            if (pendingStart) return pendingStart;
+            if (pendingStart) return pendingStart.then(followStream);
             if (s.state === 'idle') {
                 pendingStart = start().then(function () { pendingStart = null; lastError = null; },
                     function (err) { pendingStart = null; throw err; });
-                return pendingStart;
+                return pendingStart.then(followStream);
             }
+            if (s.state === 'starting' || s.state === 'streaming') return followStream();
         }).catch(function (err) {
             if (!owner || !active || generation !== token) return;
             lastError = err.message;

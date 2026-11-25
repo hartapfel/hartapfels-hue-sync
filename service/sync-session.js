@@ -21,7 +21,9 @@ module.exports = function createSession(launch) {
     };
 
     function status() {
-        return { state: current ? current.state : 'idle', error: lastError };
+        var state = { state: current ? current.state : 'idle', error: lastError ? lastError.message : null };
+        if (lastError && lastError.code) state.errorCode = lastError.code;
+        return state;
     }
 
     function finish(s, error) {
@@ -32,7 +34,7 @@ module.exports = function createSession(launch) {
         s.state = 'stopping';
         function done(releaseError) {
             var reason = releaseError || error;
-            lastError = reason ? reason.message : null;
+            lastError = reason;
             current = null;
             if (!s.ready) s.start.reject(reason || new Error('Start cancelled.'));
             s.end.resolve(status());
