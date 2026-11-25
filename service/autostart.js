@@ -156,19 +156,11 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
             retry = setTimeout(function () { retry = null; handleColdBoot(message, token); }, 5000);
         });
     }
-    function deferBoot(registration, id) {
-        // The C9 may restart its developer service bus after core-boot-done.
-        // Let Activity Manager own the delay so it survives a JS service exit.
-        var arrival = new Date(Date.now() + 40000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, 'Z');
-        return call(activity + 'create', {activity:{name:'C9 Screen Sync deferred start',
-            description:'Start Screen Sync after webOS services settle',
-            type:{foreground:true, power:false}, schedule:{start:arrival, precise:true},
-            callback:{method:'luna://org.webosbrew.c9screensync.service/onPowerOn',
-                params:{registration:registration, coreBoot:true, coldBootOnly:true, scheduledBoot:id}}},
-            start:true, replace:true, subscribe:false});
-    }
     function coreBoot(message) {
         var registration = message.payload.registration;
+        // Updates can leave a one-shot callback from 0.6.5/6 in the scheduler.
+        // Only the persistent core-ready trigger should initiate a new start.
+        if (message.payload.scheduledBoot) return message.respond({returnValue:true});
         app.acceptsBoot(registration, true).then(function (accepted) {
             if (!accepted) return message.respond({returnValue:true});
             coreSeen = registration;
@@ -177,8 +169,7 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
                 coreRequest = readBoot().then(function (id) {
                     return app.needsColdBoot(registration, id).then(function (fresh) {
                         if (!fresh || token !== generation) return;
-                        if (!message.payload.scheduledBoot) return deferBoot(registration, id);
-                        if (message.payload.scheduledBoot !== id || (owner && owner.bootId === id)) return;
+                        if (owner && owner.bootId === id) return;
                         return new Promise(function (resolve, reject) {
                             service.activityManager.create('C9 startup sync', function (activity) {
                                 if (!activity || !activity.activityId) return reject(Error('Could not keep startup active.'));
