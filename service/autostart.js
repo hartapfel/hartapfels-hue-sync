@@ -20,6 +20,11 @@ function readBootId() {
 module.exports = function autoStart(service, app, session, start, readBoot) {
     readBoot = readBoot || readBootId;
     var owner, duplicateCallbacks = [], sub, active, skipInitial = false, changing = false;
+    var coreSeen, coreRequest, coreHold, finishStartup;
+    function releaseCoreHold() {
+        if (coreHold) { service.activityManager.complete(coreHold); coreHold = null; }
+        if (finishStartup) { finishStartup(); finishStartup = null; }
+    }
     var retry, reconnect, pendingStart, generation = 0, lastError = null, suppressed = false;
     function cancelRetry() { ++generation; clearTimeout(retry); retry = null; }
     function call(uri, params) {
@@ -31,6 +36,15 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
                 reject(e);
             });
         });
+    }
+    function started(token) {
+        if (owner && generation === token && owner.bootId) {
+            return app.claimColdBoot(owner.payload.registration, owner.bootId).then(function () {
+                console.log('Screen Sync startup: Hue stream confirmed');
+                releaseCoreHold();
+            });
+        }
+        releaseCoreHold();
     }
     function onActive(token, attempt) {
         if (!owner || !active || suppressed || generation !== token) return;
@@ -46,23 +60,27 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
             });
         }
         app.status().then(function (s) {
-            if (!owner || !active || generation !== token || !s.autoStart || !s.area) return;
+            if (!owner || !active || generation !== token) return;
+            if (!s.autoStart || !s.area) return releaseCoreHold();
             if (s.state === 'stopping') return session.whenEnded().then(function () { onActive(token, attempt); });
             // A replacement power subscription can arrive before the original
             // start has settled. The new watcher inherits that attempt.
             if (pendingStart) return pendingStart.then(followStream);
             if (s.state === 'idle') {
-                pendingStart = start().then(function () { pendingStart = null; lastError = null; },
+                if (coreHold) console.log('Screen Sync startup: starting saved entertainment area');
+                pendingStart = start().then(function () { pendingStart = null; lastError = null; return started(token); },
                     function (err) { pendingStart = null; throw err; });
                 return pendingStart.then(followStream);
             }
-            if (s.state === 'starting' || s.state === 'streaming') return followStream();
+            if (s.state === 'streaming') return Promise.resolve(started(token)).then(followStream);
+            if (s.state === 'starting') return followStream();
         }).catch(function (err) {
             if (!owner || !active || generation !== token) return;
             lastError = err.message;
+            if (coreHold) console.log('Screen Sync startup: attempt ' + (attempt + 1) + ' failed (' + (err.code || 'start') + ')');
             var transient = /^(VIDEO_NOT_READY|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ENETDOWN|HTTP_50[234])$/.test(err.code);
             if (err.code === 'AREA_BUSY' || err.code === 'CAPTURE_ACCESS_DENIED' || (!transient && attempt >= 4)) {
-                suppressed = true;
+                suppressed = true; releaseCoreHold();
                 return;
             }
             var delays = [2000, 5000, 10000, 20000, 30000];
@@ -138,17 +156,68 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
             retry = setTimeout(function () { retry = null; handleColdBoot(message, token); }, 5000);
         });
     }
+    function deferBoot(registration, id) {
+        // The C9 may restart its developer service bus after core-boot-done.
+        // Let Activity Manager own the delay so it survives a JS service exit.
+        var arrival = new Date(Date.now() + 40000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, 'Z');
+        return call(activity + 'create', {activity:{name:'C9 Screen Sync deferred start',
+            description:'Start Screen Sync after webOS services settle',
+            type:{foreground:true, power:false}, schedule:{start:arrival, precise:true},
+            callback:{method:'luna://org.webosbrew.c9screensync.service/onPowerOn',
+                params:{registration:registration, coreBoot:true, coldBootOnly:true, scheduledBoot:id}}},
+            start:true, replace:true, subscribe:false});
+    }
+    function coreBoot(message) {
+        var registration = message.payload.registration;
+        app.acceptsBoot(registration, true).then(function (accepted) {
+            if (!accepted) return message.respond({returnValue:true});
+            coreSeen = registration;
+            if (!coreRequest) {
+                var token = generation;
+                coreRequest = readBoot().then(function (id) {
+                    return app.needsColdBoot(registration, id).then(function (fresh) {
+                        if (!fresh || token !== generation) return;
+                        if (!message.payload.scheduledBoot) return deferBoot(registration, id);
+                        if (message.payload.scheduledBoot !== id || (owner && owner.bootId === id)) return;
+                        return new Promise(function (resolve, reject) {
+                            service.activityManager.create('C9 startup sync', function (activity) {
+                                if (!activity || !activity.activityId) return reject(Error('Could not keep startup active.'));
+                                if (token !== generation) { service.activityManager.complete(activity); return resolve(); }
+                                release();
+                                coreHold = activity;
+                                owner = {payload:{coldBootOnly:true,registration:registration},bootId:id,respond:releaseCoreHold};
+                                active = true; suppressed = false;
+                                // Keep the scheduler's adopted callback until the
+                                // streaming activity takes ownership or startup ends.
+                                finishStartup = resolve;
+                                console.log('Screen Sync startup: checking capture service');
+                                onActive(generation, 0);
+                            });
+                        });
+                    });
+                });
+                coreRequest = coreRequest.then(function () { coreRequest = null; },
+                    function (err) { coreRequest = null; throw err; });
+            }
+            return coreRequest.then(function () { message.respond({returnValue:true}); });
+        }).catch(function (err) { lastError = err.message; message.respond({returnValue:false, errorText:err.message}); });
+    }
     service.register('onPowerOn', function (message) {
-        var allowed = ['com.palm.activitymanager', 'com.webos.service.activitymanager'];
-        if (allowed.indexOf(String(message.sender || '').split(' ')[0]) < 0 || !message.payload.$activity) {
+        var allowed = ['com.palm.activitymanager', 'com.webos.service.activitymanager', 'com.webos.service.activitymanager.client'];
+        var caller = message.ls2Message && message.ls2Message.senderServiceName ? message.ls2Message.senderServiceName() : message.sender;
+        var system = allowed.indexOf(String(caller || '').split(' ')[0]) >= 0;
+        // The C9 sends continuous triggers through the scheduler's client
+        // bus name. Its callback can omit the ordinary $activity envelope.
+        if (system && message.payload.coreBoot === true) return coreBoot(message);
+        if (!system || !message.payload.$activity) {
             return message.respond({returnValue: false, errorText: 'Startup requires a TV activity.'});
         }
-        app.acceptsBoot(message.payload.registration).then(function (accepted) {
+        app.acceptsBoot(message.payload.registration, message.payload.coreBoot).then(function (accepted) {
             if (!accepted) return message.respond({returnValue: true});
             // Responding completes the associated webOS activity. Hold duplicate
             // deliveries alongside the original until we release that activity.
             if (owner && owner.payload.registration === message.payload.registration &&
-                    owner.payload.$activity.activityId === message.payload.$activity.activityId) {
+                    owner.payload.$activity && owner.payload.$activity.activityId === message.payload.$activity.activityId) {
                 duplicateCallbacks.push(message);
                 return;
             }
@@ -167,6 +236,23 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
             }
         });
     });
+    var companion = 'luna://org.webosbrew.c9screensync.capture/scheduleBoot';
+    var installing, checkedRegistration;
+    function armCore(registration) {
+        if (installing) return installing;
+        installing = call(companion, {enabled:true,registration:registration}).then(function () {
+            checkedRegistration = registration;
+            return app.rememberScheduler(registration);
+        }).then(function (r) { installing = null; return r; },
+            function (err) { installing = null; throw err; });
+        return installing;
+    }
+    function ensure() {
+        if (!app.bootPreference || changing) return Promise.resolve();
+        return app.bootPreference().then(function (p) {
+            if (p.enabled && p.cold && (p.scheduler !== 'core' || (!coreSeen && !checkedRegistration))) return armCore(p.registration);
+        });
+    }
     function enable() {
         var registration = require('crypto').randomBytes(16).toString('hex');
         var params = {registration:registration};
@@ -179,6 +265,11 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
         }).then(function (id) {
             return app.setAutoStart(true, registration, id);
         }).then(function () {
+            if (params.coldBootOnly && app.bootPreference) {
+                return armCore(registration).catch(function (err) {
+                    return app.setAutoStart(false).then(function () { throw err; });
+                });
+            }
             skipInitial = !params.coldBootOnly;
             return call(activity + 'create', { activity: {name: name, description: 'Start screen sync on TV power-on',
                 type: {immediate: true, priority: 'low', persist: true, explicit: true, power: false},
@@ -190,14 +281,19 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
         });
     }
     function disable() {
-        return app.setAutoStart(false).then(function () {
-            release(); skipInitial = false;
+        var pref = app.bootPreference ? app.bootPreference() : Promise.resolve({});
+        return pref.then(function (p) {
+            if (p.cold && app.bootPreference) return call(companion, {enabled:false});
+        }).then(function () { return app.setAutoStart(false); }).then(function () {
+            release(); coreSeen = null; checkedRegistration = null; skipInitial = false;
             return call(activity + 'cancel', {activityName: name}).catch(function (err) {
                 if (err.code !== 2) throw err;
             });
         });
     }
     return {
+        ensure: ensure,
+        armed: function () { return !!coreSeen; },
         set: function (enabled) {
             if (changing || typeof enabled !== 'boolean') return Promise.reject(Error('Invalid or pending startup change.'));
             changing = true;
@@ -205,7 +301,8 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
                 changing = false; lastError = null; return app.status();
             }, function (err) { changing = false; throw err; });
         },
-        manualStop: function () { cancelRetry(); suppressed = true; lastError = null; },
+        manualStop: function () { releaseCoreHold(); cancelRetry(); suppressed = true; lastError = null;
+            if (app.skipColdBoot) return readBoot().then(app.skipColdBoot); },
         waiting: function () { return !!retry; },
         error: function () { return lastError; }
     };

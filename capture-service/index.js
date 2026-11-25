@@ -8,3 +8,4 @@ require('./capture')(service, function (done) {
 }, function () {
     return require('child_process').spawn(executable, [], {stdio:['ignore','ignore','ignore','pipe']});
 });
+require('./boot')(service);

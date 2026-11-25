@@ -1,13 +1,12 @@
 """Compute Hue Desktop light commands for the chart used by the ARM package test."""
-import json
 
 from desktop_video import DesktopVideo, Screen, ZONE
 from hdr_chart import PATCHES, yuv10
 from yuv import decode
 
 
-def write_reference(exe, config, output, ticks, effect):
-    presets = json.loads(config.read_text(encoding="utf-8"))["Core"]["CaptureOption"]
+def chart_commands(exe, core, ticks, effect, threshold):
+    presets = core["CaptureOption"]
     preset, = [p for p in presets if p["Name"] == "Video Default" and p["ScreenCount"] == 1]
     assert len(preset["Areas"]) == 14
     # Reference the RGB bytes presented to the desktop analyzer. The TV
@@ -26,8 +25,8 @@ def write_reference(exe, config, output, ticks, effect):
         desktop.vm.mem_write(ZONE, bytes(0x64))
         w, h, budget, offset = desktop.geometry(width, height, screen, 5000)
         desktop.capture(pixels, 0, 4*width, w, h, budget, 4*offset)
-        target, _average = desktop.accept()
+        target, _average = desktop.accept(threshold)
         for records, color in zip((first, settled), ticks(target)):
             effect.set_color(color)
             records.extend(effect.channel(identifier, effect.mix([effect.render(position)])))
-    output.write_text(json.dumps(dict(brightnessPercent=100, channels=channels, first=first.hex(), settled=settled.hex())), encoding="utf-8")
+    return dict(channels=channels, first=first.hex(), settled=settled.hex())

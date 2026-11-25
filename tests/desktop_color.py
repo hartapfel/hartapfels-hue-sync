@@ -1,6 +1,7 @@
 """Compare both color transforms and the per-channel filter to desktop CPU instructions."""
 import argparse
 import ctypes as ct
+import json
 from itertools import product
 from pathlib import Path
 import random
@@ -189,15 +190,27 @@ def main():
     assert records == FIRST_SPLIT_RECORDS, records.hex()
     print("The ARM package fixture's first two channel records matched the desktop renderer and serializer.")
     if args.chart_reference:
-        from desktop_chart import write_reference
-        vm.mem_write(config + 0xe8, struct.pack("<f", gains[100]))
+        from desktop_chart import chart_commands
+        preset_path, destination = args.chart_reference
+        core = json.loads(preset_path.read_text(encoding="utf-8"))["Core"]
         def chart_ticks(target):
             vm.mem_write(frame + 0x50, bytes(Triple()))
             first = desktop_tick(target, 60.)
             # Advance the desktop's own elapsed-time filter by one minute
             # with a constant target to obtain its settled output.
             return first, desktop_tick(target, 1. / 60.)
-        write_reference(args.desktop, *args.chart_reference, chart_ticks, effect)
+        controls = []
+        for index, (name, percent) in enumerate(zip(("Subtle","Moderate","High","Intense"), (50,100,75,5))):
+            settings, = [p for p in core["AppMode"]["Video"]["Presets"] if p["Name"] == name]
+            vm.mem_write(preset + 0x44, struct.pack("<ff", settings["Alpha_AB"], settings["Alpha_L"]))
+            vm.mem_write(config + 0xe8, struct.pack("<f", gains[percent]))
+            observed = chart_commands(args.desktop, core, chart_ticks, effect, settings["ColorsCompareTreshold"])
+            controls.append(dict(intensity=index, name=name, brightnessPercent=percent, first=observed["first"]))
+            if name == "Moderate":
+                reference = dict(observed, brightnessPercent=percent)
+        reference["controls"] = controls
+        destination.write_text(json.dumps(reference), encoding="utf-8")
+        vm.mem_write(preset + 0x44, struct.pack("<ff", .30, .025))
     cases = 0
     vectors = bytearray()
     for gain in (0.25, 1, 1.5, 5):

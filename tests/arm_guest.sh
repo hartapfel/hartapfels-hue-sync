@@ -46,6 +46,9 @@ test_package() {
         /capture-fixture/c9-capture-zones 3>zones.raw 2>zones.err
         [ "$(wc -c <zones.raw)" -eq 672 ] || return 1
         test_stream zones || return 1
+        for i in 0 1 2 3; do
+            if [ -f "initial-$i" ]; then test_stream zones "$i" || return 1; fi
+        done
     fi
     return 0
 }
@@ -89,10 +92,13 @@ test_stream() {
         /app/c9-sync --wait-for-bridge <worker.in >session.out 2>session.err &
     fi
     child=$!
-    if [ "$1" != split ]; then printf '\144\001' >&4; fi
+    if [ -n "$2" ]; then cat "initial-$2" >&4
+    elif [ "$1" != split ]; then printf '\144\001' >&4; fi
     cat "$descriptor" >&4
     if [ "$1" = zones ]; then
-        (for i in $(seq 1 95); do head -c 84 zones.raw; sleep .2; done) >frame.in &
+        repeats=95
+        if [ -n "$2" ]; then repeats=12; fi
+        (for i in $(seq 1 "$repeats"); do head -c 84 zones.raw; sleep .2; done) >frame.in &
     else
         wait_port && [ ! -s session.out ] || return 1
         feed_frames "$1" | nc -w 2 127.0.0.1 19401 >acks &
@@ -122,7 +128,11 @@ test_stream() {
     if [ "$1" != zones ]; then grep -q 'PicCap input disconnected' session.err && [ -s acks ] || return 1; fi
     [ "$(cat session.out)" = "$(printf 'video-ready\nstreaming')" ] || return 1
     wait "$peer" || return 1
-    if [ "$1" = chart ] || [ "$1" = zones ]; then
+    if [ -n "$2" ]; then
+        echo "C9-PRESET-${2}-BEGIN"
+        head -c 150 packets | base64
+        echo "C9-PRESET-${2}-END"
+    elif [ "$1" = chart ] || [ "$1" = zones ]; then
         marker=$(echo "$1" | tr a-z A-Z)
         echo "C9-${marker}-STREAM $(wc -c <packets)"
         # One HueStream header and 14 RGB16 channel records per frame.
@@ -140,6 +150,7 @@ test_stream() {
     fi
     exec 3>&- 4>&-
     rm peer.in worker.in
+    if [ "$1" = zones ]; then rm frame.in; fi
 }
 
 # Give the worker a service-like parent. It treats adoption by PID 1 as an

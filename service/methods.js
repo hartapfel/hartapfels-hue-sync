@@ -33,8 +33,10 @@ module.exports = function register(service, app, session) {
         });
     }
     var boot = require('./autostart')(service, app, session, start);
-    add('status', function () { return app.status().then(function (s) {
-        if (!s.error) s.error = boot.error();
+    add('status', function () { var setupError;
+        return boot.ensure().catch(function (err) { setupError = err.message; }).then(app.status).then(function (s) {
+        s.bootArmed = boot.armed();
+        if (!s.error) s.error = setupError || boot.error();
         if (boot.waiting()) s.wakeRetry = true;
         return s;
     }); });
@@ -44,6 +46,6 @@ module.exports = function register(service, app, session) {
     add('setSource', function (params) { return app.setSource(params.source); });
     add('setPlayback', function (p) { return app.setPlayback(p.brightness, p.intensity); });
     add('start', start);
-    add('stop', function () { boot.manualStop(); return app.stop(); });
+    add('stop', function () { var stopped = app.stop(); return Promise.all([stopped,boot.manualStop()]).then(function (r) { return r[0]; }); });
     add('setAutoStart', function (params) { return boot.set(params.enabled); });
 };

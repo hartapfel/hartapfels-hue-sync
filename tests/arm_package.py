@@ -112,7 +112,12 @@ def add_fixture(vm, temp, args):
     vm.add("fixture/direct-session", bytes((100, 1)) +
            subprocess.check_output(["node", "-e", script, json.dumps(direct)], cwd=temp))
     if args.chart_reference:
-        config[2]["channels"] = json.loads(args.chart_reference.read_text())["channels"]
+        reference = json.loads(args.chart_reference.read_text())
+        for case in reference.get("controls", []):
+            index = case["intensity"]
+            assert index in range(4) and case["brightnessPercent"] in range(101)
+            vm.add(f"fixture/initial-{index}", bytes((case["brightnessPercent"], index)))
+        config[2]["channels"] = reference["channels"]
         assert len(config[2]["channels"]) == 14
         vm.add("fixture/chart-descriptor", subprocess.check_output(["node", "-e", script, json.dumps(config)], cwd=temp))
         config[3]["source"] = "zones"
@@ -231,8 +236,17 @@ def main():
         log = result.stdout.decode(errors="replace")
         verify(log, expected)
         if args.chart_reference:
+            reference = json.loads(args.chart_reference.read_text())
             for source in ("CHART", "ZONES"):
-                verify_chart_stream(log, json.loads(args.chart_reference.read_text()), source)
+                verify_chart_stream(log, reference, source)
+            for case in reference.get("controls", []):
+                prefix = f"C9-PRESET-{case['intensity']}"
+                match = re.search(rf"{prefix}-BEGIN\s+([A-Za-z0-9+/=\s]+?)\s+{prefix}-END", log)
+                assert match, prefix
+                packet = base64.b64decode("".join(match[1].split()), validate=True)
+                header = b"HueStream" + bytes((2, 0, 0, 0, 0, 0, 0)) + AREA.encode()
+                assert packet == header + bytes.fromhex(case["first"]), (prefix, packet.hex())
+                print(f"{case['name']} at {case['brightnessPercent']}%: all 14 first-frame records matched desktop")
         if args.desktop_vectors:
             summary = next(line for line in log.splitlines() if line.startswith("Desktop ticks "))
             assert int(summary.split()[2]) == len(vectors)//40

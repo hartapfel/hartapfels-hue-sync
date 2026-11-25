@@ -95,10 +95,10 @@ class DesktopVideo(DesktopBitmap):
         self._call(0x161b00, (0, RESULT, XY))
         return struct.unpack("<I", vm.mem_read(COUNTS + 0x300c, 4))[0]
 
-    def accept(self):
+    def accept(self, compare_threshold=2):
         self._call(0x162980, (0, ZONE, RESULT))
         self.registers(RBX=PRESET, RDI=0, R8=0, R9=ZONE, RBP=BP, XMM3=bits(255))
-        self.vm.mem_write(PRESET + 12, bytes([2]))
+        self.vm.mem_write(PRESET + 12, bytes([compare_threshold]))
         self.run(0x170d70, 0x170e72)
         return tuple(struct.unpack("<3f", self.vm.mem_read(ZONE + off, 12)) for off in (0, 0x28))
 

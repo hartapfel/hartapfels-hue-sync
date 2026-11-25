@@ -3,7 +3,7 @@
 // This controller is shared by user-initiated requests and the boot callback.
 // Settings writes serialize with starts; stop always reaches a pending start.
 module.exports = function controller(hue, store, session, checkAccess) {
-    var settings, directAccess, writing = false;
+    var settings, directAccess, writing = false, pendingWrite;
     var loaded = store.load().then(function (value) {
         settings = value;
         if (settings.brightness === undefined) settings.brightness = 100;
@@ -27,14 +27,19 @@ module.exports = function controller(hue, store, session, checkAccess) {
         Object.keys(changes).forEach(function (key) { next[key] = changes[key]; });
         return store.save(next).then(function () { settings = next; return status(); });
     }
-    function edit(fn, allowStreaming) {
+    function edit(fn, allowStreaming, waitForWrite) {
         return loaded.then(function () {
+            if (writing && waitForWrite) {
+                var resume = function () { return edit(fn, allowStreaming, true); };
+                return pendingWrite.then(resume, resume);
+            }
             if (writing || (!allowStreaming && session.status().state !== 'idle')) throw Error('Setup is busy.');
             writing = true;
-            return Promise.resolve().then(fn).then(function (result) {
+            pendingWrite = Promise.resolve().then(fn).then(function (result) {
                 writing = false;
                 return result;
             }, function (err) { writing = false; throw err; });
+            return pendingWrite;
         });
     }
     function client() {
@@ -61,24 +66,49 @@ module.exports = function controller(hue, store, session, checkAccess) {
                 });
             });
         },
-        acceptsBoot: function (registration) {
+        bootPreference: function () {
+            return loaded.then(function () {
+                return {enabled:settings.autoStart === true, cold:!!settings.lastColdBoot,
+                    registration:settings.bootRegistration, scheduler:settings.bootScheduler};
+            });
+        },
+        rememberScheduler: function (registration) {
+            return edit(function () {
+                if (!settings.autoStart || registration !== settings.bootRegistration) throw Error('Startup setting changed.');
+                if (settings.bootScheduler === 'core') return status();
+                return commit({bootScheduler:'core'});
+            }, true, true);
+        },
+        acceptsBoot: function (registration, coreBoot) {
             return loaded.then(function () {
                 return settings.autoStart === true && typeof registration === 'string' &&
-                    registration === settings.bootRegistration;
+                    registration === settings.bootRegistration && (settings.bootScheduler !== 'core' || coreBoot === true);
             });
+        },
+        needsColdBoot: function (registration, id) {
+            return loaded.then(function () {
+                return settings.autoStart && registration === settings.bootRegistration &&
+                    settings.lastColdBoot !== id && settings.skipColdBoot !== id;
+            });
+        },
+        skipColdBoot: function (id) {
+            return edit(function () {
+                if (settings.autoStart && settings.lastColdBoot && settings.lastColdBoot !== id && settings.skipColdBoot !== id)
+                    return commit({skipColdBoot:id});
+            }, true, true);
         },
         claimColdBoot: function (registration, id) {
             return edit(function () {
                 if (!settings.autoStart || registration !== settings.bootRegistration ||
                         !settings.lastColdBoot || settings.lastColdBoot === id) return false;
                 return commit({lastColdBoot:id}).then(function () { return true; });
-            }, true);
+            }, true, true);
         },
         setAutoStart: function (enabled, registration, bootId) {
             return edit(function () {
                 if (typeof enabled !== 'boolean') throw Error('Choose a startup setting.');
                 if (enabled && !settings.area) throw Error('Select an entertainment area first.');
-                return commit({autoStart: enabled, bootRegistration: enabled ? registration : undefined,
+                return commit({autoStart: enabled, bootScheduler:undefined, skipColdBoot:undefined, bootRegistration: enabled ? registration : undefined,
                     lastColdBoot: enabled ? bootId : undefined});
             }, true);
         },

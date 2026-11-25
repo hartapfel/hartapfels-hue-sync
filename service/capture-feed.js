@@ -4,7 +4,12 @@ module.exports = function captureFeed(service) {
     return {
         access: function () {
             return new Promise(function (resolve) {
+                // A pending LS2 call alone does not keep the C9's Node loop alive.
+                // Treat a lost status reply as unknown; the frame subscription
+                // still enforces device permission when starting capture.
+                var deadline = setTimeout(function () { resolve(null); }, 5000);
                 service.call(base + 'status', {}, function (msg) {
+                    clearTimeout(deadline);
                     var p = msg.payload || {};
                     resolve(p.returnValue ? p.deviceAccess : null);
                 });
