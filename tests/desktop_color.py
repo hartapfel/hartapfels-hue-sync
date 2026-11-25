@@ -51,14 +51,15 @@ def main():
         vm.mem_write(IMAGE_BASE + page, data[page - 0x1600:page - 0x1600 + 0x1000])
     vm.mem_map(IMAGE_BASE + 0x390000, 0x1000, UC_PROT_READ | UC_PROT_EXEC)
 
-    def power(machine, _address, _size, _unused):
-        machine.reg_write(regs[0], bits(powf(scalar(machine, regs[0]), scalar(machine, regs[1]))))
+    def math_call(machine, address, _size, _unused):
+        function = powf if address == IMAGE_BASE + 0x39075a else min
+        machine.reg_write(regs[0], bits(function(scalar(machine, regs[0]), scalar(machine, regs[1]))))
         sp = machine.reg_read(x86.UC_X86_REG_RSP)
         ret, = struct.unpack("<Q", machine.mem_read(sp, 8))
         machine.reg_write(x86.UC_X86_REG_RSP, sp + 8)
         machine.reg_write(x86.UC_X86_REG_RIP, ret)
 
-    vm.hook_add(UC_HOOK_CODE, power, begin=IMAGE_BASE + 0x39075a, end=IMAGE_BASE + 0x39075a)
+    vm.hook_add(UC_HOOK_CODE, math_call, begin=IMAGE_BASE + 0x39075a, end=IMAGE_BASE + 0x39075a)
     vm.reg_write(x86.UC_X86_REG_RSP, STACK)
     vm.reg_write(x86.UC_X86_REG_R14, STATE)
     vm.reg_write(x86.UC_X86_REG_R15, STATE + 512)
@@ -98,6 +99,51 @@ def main():
                 worst[stage] = max(worst[stage], error)
             previous = filtered
     print(f"{len(points)*2} RGB/Lab/filter/RGB comparisons passed; max absolute errors {worst}")
+    # Run the complete ordinary per-zone output path through gamut mode 2 and
+    # the final black cutoff, with the desktop's preset coefficients in memory.
+    for page in [0x172000, 0xc4000, 0xc5000, 0x38f000]:
+        vm.mem_map(IMAGE_BASE + page, 0x1000, UC_PROT_READ | UC_PROT_EXEC)
+    for start, end in [(0x1714fc, 0x1720c3), (0xc4940, 0xc49b3), (0xc5031, 0xc504b),
+                       (0x38f0f0, 0x38f1f9)]:
+        vm.mem_write(IMAGE_BASE + start, data[start - 0xc00:end - 0xc00])
+    vm.mem_map(IMAGE_BASE + 0x1406000, 0x1000, UC_PROT_READ)
+    vm.mem_map(IMAGE_BASE + 0x3ba000, 0x1000, UC_PROT_READ)
+    vm.mem_write(IMAGE_BASE + 0x3ba4c0, struct.pack("<Q", IMAGE_BASE + 0x390800))
+    vm.hook_add(UC_HOOK_CODE, math_call, begin=IMAGE_BASE + 0x390800, end=IMAGE_BASE + 0x390800)
+    lib.c9_video_moderate_tick.argtypes = [Triple, ct.POINTER(Triple), ct.c_float, ct.c_float, ct.c_uint]
+    lib.c9_video_moderate_tick.restype = Triple
+    frame, config, preset, areas = STATE, STATE + 0x400, STATE + 0x800, STATE + 0xc00
+    sp, bp = 0x1d000, 0x1d150
+    vm.mem_write(preset + 0x44, struct.pack("<ff", .30, .025))
+    vm.mem_write(preset + 0x9c, struct.pack("<I", 2))
+    vm.mem_write(config + 0x2b0, bytes([1]))
+    vm.mem_write(areas + 0x20, struct.pack("<QQ", frame, frame + 0x88))
+    vm.mem_write(sp + 0x70, struct.pack("<Q", areas))
+    vm.mem_write(areas + 0x40, struct.pack("<Q", areas + 0x80))
+    cases = 0
+    for gain in (0.25, 1, 1.5, 5):
+        for fps in (24, 60):
+            for threshold in (1, 18):
+                history = Triple(0, 0, 0)
+                vm.mem_write(frame + 0x50, bytes(history))
+                vm.mem_write(config + 0xe8, struct.pack("<f", gain))
+                vm.mem_write(config + 0xf0, struct.pack("<d", threshold / 255))
+                for point in [(0,0,0), (0.01,0.01,0.01), *points[:125:7], (1,1,1), (0,0,0)]:
+                    vm.mem_write(frame, struct.pack("<4fI", *point, 0, 1))
+                    for reg, value in [(x86.UC_X86_REG_RSP, sp), (x86.UC_X86_REG_RBP, bp),
+                                       (x86.UC_X86_REG_R15, preset), (x86.UC_X86_REG_R13, config),
+                                       (x86.UC_X86_REG_RDI, areas)]:
+                        vm.reg_write(reg, value)
+                    for reg, value in [(6,fps),(8,12.92),(9,.055),(10,1),(12,0)]:
+                        vm.reg_write(regs[reg], bits(value))
+                    vm.emu_start(IMAGE_BASE + 0x1714fc, IMAGE_BASE + 0x1720c3, count=1600)
+                    assert vm.reg_read(x86.UC_X86_REG_RIP) == IMAGE_BASE + 0x1720c3
+                    rg = struct.unpack("<dd", vm.reg_read(regs[0]).to_bytes(16,"little"))
+                    blue, = struct.unpack("<d",vm.mem_read(bp-0x30,8))
+                    result = lib.c9_video_moderate_tick(Triple(*point),ct.byref(history),gain,fps,threshold)
+                    assert max(abs(a-b) for a,b in zip(result.values(),(*rg,blue))) <= 1e-5, (point,result.values(),rg,blue)
+                    cases += 1
+    print(f"{cases} ordinary Video/Moderate ticks matched through the final black cutoff.")
 
 
 if __name__ == "__main__":
