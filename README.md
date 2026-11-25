@@ -61,6 +61,8 @@ cmake --build build/arm --target c9-sync c9-capture-check
 
 The mixer composites the rendered colors of all matching regions in effect-layer order. For 272 cases including shared volumes, transparent layers and opaque layers, the host and linked ARM code matched the desktop mixer's three double-precision results exactly. The test supplies the rendered layers, so it can isolate composition from capture and the creation of each effect.
 
+The ordinary video area effect preserves its input RGB and gives it full opacity inside the room volume, including on its boundary. Outside the volume the effect returns transparent black. Running the installed desktop constructor, color setter and renderer on 225 colors at three positions confirmed all 675 results through the mixer and RGB16 serializer. This check covers the default video effect with no optional brightness override. Run it with `python tests/desktop_area.py 'C:/Program Files/Hue Sync/HueSync.exe'`.
+
 ```powershell
 cmake --build build/host-msvc --target c9_bitmap
 python tests/desktop_mixer.py 'C:/Program Files/Hue Sync/HueSync.exe' build/host-msvc/c9_bitmap.dll build/arm/c9-capture-check
