@@ -1,9 +1,10 @@
-"""Compare raw C9 patch codes with an unchanged HDR10 signal in two 8-bit ranges."""
+"""Compare a C9 capture with the HDR10 source and an optional measured Windows desktop."""
+import argparse
 import json
 import math
 from pathlib import Path
-import sys
 from hdr_chart import GRAY_NITS, PATCHES, pq, yuv10
+from yuv import decode
 
 
 def reference(patch, layout, limited):
@@ -36,5 +37,48 @@ def summarize(report):
         print(f"Unchanged PQ/BT.2020 ({label} range): RMS {rms:.2f}, max {max(map(abs,errors)):.2f} codes")
 
 
+def compare_desktop(tv, desktop):
+    # Remove the repeated marker row from the error totals. Give gray and
+    # colored patches separate scores so transfer and chroma errors are visible.
+    bits = {24: 1023, 28: 255, 29: 255, 87: 255, 91: 255}
+    maximum = bits.get(desktop.get("dxgiFormat"))
+    patches = desktop.get("patches", [])
+    if (not maximum or desktop.get("codeMax") != maximum or desktop.get("chart") != "c9-hdr10-v1" or
+            desktop.get("source") != "desktop-duplication" or desktop.get("displayColorSpace") != 12 or
+            desktop.get("frames", 0) < 3 or len(patches) != len(PATCHES) or
+            any(len(p) != 3 or any(type(c) is not int or not 0 <= c <= maximum for c in p) for p in patches)):
+        raise ValueError("Expected measured patch codes from the Windows HDR desktop chart")
+    target = [[c * 255 / maximum for c in p] for p in patches[6:]]
+    observed = tv["patches"][6:]
+    candidates = {}
+    if tv["format"] == "RGB24":
+        candidates["RGB full"] = observed
+        candidates["RGB limited"] = [[max(0, min(255, (c-16)*255/219)) for c in p] for p in observed]
+    else:
+        for i, matrix in enumerate(("BT.601", "BT.709", "BT.2020")):
+            for full in (False, True):
+                name = matrix + (" full" if full else " limited")
+                candidates[name] = [decode(*p, i, full) for p in observed]
+    scores = {}
+    for name, colors in candidates.items():
+        errors = [[a-b for a, b in zip(color, ref)] for color, ref in zip(colors, target)]
+        def rms(group):
+            return math.sqrt(sum(x*x for p in group for x in p) / (3 * len(group)))
+        scores[name] = (rms(errors[:12]), rms(errors[12:]), max(abs(x) for p in errors for x in p))
+    return scores
+
+
 if __name__ == "__main__":
-    summarize(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8-sig")))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("measurement", type=Path)
+    parser.add_argument("--desktop", type=Path, help="JSON from c9-desktop-chart --measure")
+    args = parser.parse_args()
+    report = json.loads(args.measurement.read_text(encoding="utf-8-sig"))
+    summarize(report)
+    if args.desktop:
+        desktop = json.loads(args.desktop.read_text(encoding="utf-8-sig"))
+        scores = compare_desktop(report, desktop)
+        print("Difference from measured Windows desktop in 8-bit RGB codes")
+        print("Decoder            Gray RMS    Color RMS     Maximum")
+        for name, (gray, color, peak) in scores.items():
+            print(f"{name:16s} {gray:10.2f} {color:12.2f} {peak:11.2f}")

@@ -42,6 +42,26 @@ Generate the 15-second HEVC Main 10 chart with `python tests/hdr_chart.py ffmpeg
 
 The worker samples five interior points per tile, requires the marker and eight stable frames, and reports raw RGB or Y/Cb/Cr averages before matrix conversion or sync grading. The local test decodes the generated clip, sends RGB24 and padded NV12 through the PicCap protocol, interrupts a run of seven chart frames with a blank frame, and checks all 24 triples for both formats.
 
+To compare against a Windows HDR capture, build the chart reader from this directory in an x64 Visual Studio Developer PowerShell. Its self-test checks channel order and readback using offscreen D3D11 textures.
+
+```powershell
+New-Item -ItemType Directory -Force build/chart-tools | Out-Null
+cl /nologo /std:c++17 /EHsc /W4 /O2 tests/windows_hdr_chart.cpp /Fo:build/chart-tools/windows_hdr_chart.obj /Fe:build/chart-tools/c9-desktop-chart.exe dxgi.lib d3d11.lib user32.lib
+& ./build/chart-tools/c9-desktop-chart.exe --self-test
+```
+
+On a PC with an active HDR10 output, the following measurement briefly displays a small HDR10 window on that monitor. It uses the desktop app's duplication API and format list. It reads the 24 patch centers after three stable presentations. The result describes the Windows compositor on that monitor. The `dxgiFormat` field identifies the returned pixels, while `bitsPerColor` describes the display output. [Microsoft desktop duplication](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_5/nf-dxgi1_5-idxgioutput5-duplicateoutput1) · [Microsoft output properties](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_6/ns-dxgi1_6-dxgi_output_desc1)
+
+```powershell
+$reference = & ./build/chart-tools/c9-desktop-chart.exe --measure
+if ($LASTEXITCODE -eq 0) {
+    $reference | Set-Content -Encoding utf8 build/desktop-hdr-reference.json
+    python tests/read_hdr_chart.py measurement.json --desktop build/desktop-hdr-reference.json
+}
+```
+
+The comparison reports gray and color errors separately on a 0–255 RGB scale. For NV12 and NV16 it tries BT.601, BT.709 and BT.2020 at both video and full range. For RGB24 it tries both ranges. If all decoders show large gray errors, changing the Y′CbCr matrix alone cannot explain that brightness difference.
+
 With Zig 0.13.0 and a checkout of `webosbrew/hyperion-webos` at `00c932f092084b234b3f619b060a98fa134c12bd`, the following PowerShell commands cross-compile the checker locally and test the linked ARM code. Set `$piccap` to that checkout.
 
 ```powershell

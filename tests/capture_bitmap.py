@@ -1,11 +1,11 @@
 """Compare direct strided capture-plane analysis to decoded RGB at desktop sample positions."""
 import ctypes as ct
-import math
 import random
 import sys
 
 from desktop_bitmap import DesktopBitmap
 from arm_bitmap import ArmBitmap
+from yuv import decode
 
 
 class Plane(ct.Structure):
@@ -19,17 +19,6 @@ class Frame(ct.Structure):
 
 class Region(ct.Structure):
     _fields_ = [(field, ct.c_uint) for field in ("x", "y", "width", "height")]
-
-
-def decode(y, u, v, matrix, full):
-    kr, kb = ((.299, .114), (.2126, .0722), (.2627, .0593))[matrix]
-    y = y if full else (y - 16) * 255 / 219
-    u = (u - 128) * (1 if full else 255 / 224)
-    v = (v - 128) * (1 if full else 255 / 224)
-    red = y + 2 * (1 - kr) * v
-    blue = y + 2 * (1 - kb) * u
-    green = (y - kr * red - kb * blue) / (1 - kr - kb)
-    return tuple(max(0, min(255, math.floor(x + .5))) for x in (red, green, blue))
 
 
 def main():
