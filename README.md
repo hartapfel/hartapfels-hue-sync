@@ -131,11 +131,13 @@ The fixture uses these files in `build/arm-vm`:
 
 ```powershell
 cmake --build build/arm --target c9-test-capture-backend
-python tests/desktop_color.py 'C:/Program Files/Hue Sync/HueSync.exe' build/host-msvc/c9_bitmap.dll --arm-vectors build/arm-vm/desktop-ticks.bin
-python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.4.2_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb --desktop-vectors build/arm-vm/desktop-ticks.bin
+python tests/desktop_color.py 'C:/Program Files/Hue Sync/HueSync.exe' build/host-msvc/c9_bitmap.dll --arm-vectors build/arm-vm/desktop-ticks.bin --chart-reference "$env:APPDATA/HueSync/config.json" build/arm-vm/desktop-chart.json
+python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.4.2_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb --desktop-vectors build/arm-vm/desktop-ticks.bin --chart-reference build/arm-vm/desktop-chart.json
 ```
 
 The optional desktop vectors exercise 528 Video/Moderate ticks inside the worker extracted from the IPK. Each run carries its own history through multiple colors, including black, mixed tones and highlights. On the two ARM runtimes the maximum absolute channel error against the desktop was 0.00000011921 on a 0–1 scale.
+
+The optional chart test places one virtual light at the center of each of the 14 desktop video regions. The ARM worker receives the 24-patch chart through PicCap's NV12 protocol. The reference supplies the desktop analyzer with the corresponding pixels decoded using the worker's configured BT.709 limited range. It runs the desktop sampling, Video/Moderate filter, renderer and serializer. The test compares the actual RGB16 commands at the local DTLS receiver on the first packet and after holding the chart for 16 seconds. This isolates differences introduced after capture. Measuring how C9 firmware and Windows each represent the same HDR scene requires the separate capture measurements above.
 
 The service's bridge client identifies a bridge by its certificate and bridge ID, pairs via its link button, and reads the selected Entertainment area's channel IDs and three-dimensional positions. It checks the active application before requesting start or stop. Pairing and ownership transitions are covered by the local fixture, `node tests/bridge.js`, which also runs on Node 0.12.2. A read-only check on a BSB003 bridge imported all 12 channels of the selected area. Each position matched a single desktop preset cuboid. The certificate check also passed on Windows with the C9-generation Node runtime. The public roots come from the pair documented by OpenHue. [OpenHue bridge roots](https://github.com/openhue/openhue-go/blob/main/certs.go) · [LG service runtime versions](https://webostv.developer.lge.com/develop/guides/js-service-basics)
 

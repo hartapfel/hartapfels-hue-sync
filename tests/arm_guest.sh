@@ -36,19 +36,42 @@ test_package() {
     wait "$child" && [ -s acks ] || return 1
     cat chart.out
 
+    test_stream split || return 1
+    if [ -f chart-descriptor ]; then test_stream chart || return 1; fi
+    return 0
+}
+
+feed_frames() {
+    if [ "$1" = chart ]; then
+        cat register chart
+        for i in $(seq 1 100); do
+            grep -qx streaming session.out && break
+            sleep .05
+        done
+        # Keep the same source for at least 16 seconds after the first
+        # output, below the 101 new observations required to change the crop.
+        for i in $(seq 1 80); do cat chart; sleep .2; done
+    else
+        cat register split
+        for i in $(seq 1 100); do
+            grep -qx streaming session.out && break
+            sleep .05; cat split
+        done
+        for i in $(seq 1 14); do cat split; sleep .05; done
+        for i in $(seq 1 14); do cat white; sleep .05; done
+    fi
+}
+
+test_stream() {
+    descriptor=descriptor
+    if [ "$1" = chart ]; then descriptor=chart-descriptor; fi
     mkfifo peer.in worker.in
     exec 4<>worker.in
     /app/c9-sync --wait-for-bridge <worker.in >session.out 2>session.err &
     child=$!
-    cat descriptor >&4
+    cat "$descriptor" >&4
     wait_port && [ ! -s session.out ] || return 1
-    { cat register split
-      for i in $(seq 1 100); do
-          grep -qx streaming session.out && break
-          sleep .05; cat split
-      done
-      for i in $(seq 1 14); do cat split; sleep .05; done
-      for i in $(seq 1 14); do cat white; sleep .05; done; } | nc -w 2 127.0.0.1 19401 >acks &
+    feed_frames "$1" | nc -w 2 127.0.0.1 19401 >acks &
     for i in $(seq 1 100); do grep -qx video-ready session.out && break; sleep .05; done
     [ "$(cat session.out)" = video-ready ] || return 1
     # Start the bridge peer only after the worker has processed a real frame.
@@ -66,9 +89,19 @@ test_package() {
     [ "$?" = 1 ] && grep -q 'PicCap input disconnected' session.err || return 1
     [ "$(cat session.out)" = "$(printf 'video-ready\nstreaming')" ] && [ -s acks ] || return 1
     wait "$peer" || return 1
-    echo C9-PACKETS-BEGIN
-    base64 packets
-    echo C9-PACKETS-END
+    if [ "$1" = chart ]; then
+        echo "C9-CHART-STREAM $(wc -c <packets)"
+        # One HueStream header and 14 RGB16 channel records per frame.
+        head -c 150 packets | base64
+        tail -c 150 packets | base64
+        echo C9-CHART-END
+    else
+        echo C9-PACKETS-BEGIN
+        base64 packets
+        echo C9-PACKETS-END
+    fi
+    exec 3>&- 4>&-
+    rm peer.in worker.in
 }
 
 # Give the worker a service-like parent. It treats adoption by PID 1 as an

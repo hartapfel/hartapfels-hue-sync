@@ -105,6 +105,10 @@ def add_fixture(vm, temp, args):
               {"width": 96, "height": 64, "fps": 30, "matrix": 1, "range": 0, "source": "piccap"}, 2100]
     script = "process.stdout.write(require('./worker-session').apply(null, JSON.parse(process.argv[1])))"
     vm.add("fixture/descriptor", subprocess.check_output(["node", "-e", script, json.dumps(config)], cwd=temp))
+    if args.chart_reference:
+        config[2]["channels"] = json.loads(args.chart_reference.read_text())["channels"]
+        assert len(config[2]["channels"]) == 14
+        vm.add("fixture/chart-descriptor", subprocess.check_output(["node", "-e", script, json.dumps(config)], cwd=temp))
 
     def packet(name, kind, fields):
         src = temp / (name + ".json")
@@ -158,12 +162,33 @@ def verify(log, expected):
           f"The packaged worker delivered {len(frames)} decrypted two-channel frames.")
 
 
+def verify_chart_stream(log, reference):
+    match = re.search(r"C9-CHART-STREAM\s+(\d+)\s+([A-Za-z0-9+/=\s]+?)\s+C9-CHART-END", log)
+    assert match, "Missing chart stream"
+    count, remainder = divmod(int(match[1]), 150)
+    endpoints = base64.b64decode("".join(match[2].split()), validate=True)
+    assert len(endpoints) == 300 and not remainder and count >= 30
+    for packet, sequence, key, tolerance in [(endpoints[:150], 0, "first", 0),
+                                             (endpoints[150:], count-1, "settled", 2)]:
+        assert packet[:52] == b"HueStream" + bytes((2, 0, sequence % 256, 0, 0, 0, 0)) + AREA.encode()
+        expected = bytes.fromhex(reference[key])
+        assert len(expected) == 98
+        worst = 0
+        for actual, target in zip(struct.iter_unpack(">B3H", packet[52:]), struct.iter_unpack(">B3H", expected)):
+            assert actual[0] == target[0]
+            error = max(abs(a-b) for a, b in zip(actual[1:], target[1:]))
+            assert error <= tolerance, (key, actual, target, error)
+            worst = max(worst, error)
+        print(f"14-channel chart {key} frame: maximum difference {worst} RGB16 codes from desktop")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("ipk", "assets", "qemu", "flatc", "schema", "runtime"):
         parser.add_argument(name, type=Path)
     parser.add_argument("--test-backend", type=Path, default=ROOT / "build/arm/libc9-test-capture-backend.so")
     parser.add_argument("--desktop-vectors", type=Path, help="Tick vectors from tests/desktop_color.py --arm-vectors")
+    parser.add_argument("--chart-reference", type=Path, help="Desktop channel output from tests/desktop_color.py --chart-reference")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(dir=ROOT / "build") as work:
         temp = Path(work)
@@ -184,6 +209,8 @@ def main():
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=90)
         log = result.stdout.decode(errors="replace")
         verify(log, expected)
+        if args.chart_reference:
+            verify_chart_stream(log, json.loads(args.chart_reference.read_text()))
         if args.desktop_vectors:
             summary = next(line for line in log.splitlines() if line.startswith("Desktop ticks "))
             assert int(summary.split()[2]) == len(vectors)//40

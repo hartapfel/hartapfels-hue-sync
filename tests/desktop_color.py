@@ -33,6 +33,8 @@ def main():
     parser.add_argument("desktop", type=Path)
     parser.add_argument("library", type=Path)
     parser.add_argument("--arm-vectors", type=Path, help="Save desktop tick outputs for the ARM package fixture")
+    parser.add_argument("--chart-reference", type=Path, nargs=2, metavar=("PRESET_CONFIG", "OUTPUT"),
+                        help="Write the 14-channel desktop reference for the ARM NV12 chart stream")
     args = parser.parse_args()
     vm = DesktopBitmap(args.desktop).vm
     data = args.desktop.read_bytes()
@@ -162,6 +164,15 @@ def main():
         records.extend(effect.channel(identifier, effect.mix([layer])))
     assert records == FIRST_SPLIT_RECORDS, records.hex()
     print("The ARM package fixture's first two channel records matched the desktop renderer and serializer.")
+    if args.chart_reference:
+        from desktop_chart import write_reference
+        def chart_ticks(target):
+            vm.mem_write(frame + 0x50, bytes(Triple()))
+            first = desktop_tick(target, 60.)
+            # Advance the desktop's own elapsed-time filter by one minute
+            # with a constant target to obtain its settled output.
+            return first, desktop_tick(target, 1. / 60.)
+        write_reference(args.desktop, *args.chart_reference, chart_ticks, effect)
     cases = 0
     vectors = bytearray()
     for gain in (0.25, 1, 1.5, 5):
