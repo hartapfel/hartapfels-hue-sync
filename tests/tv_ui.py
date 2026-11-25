@@ -57,8 +57,8 @@ var steps = [
     },
     function () {
         check(byId('direct').getAttribute('aria-pressed') === 'true', 'Direct video input');
-        check(byId('sourceHelp').textContent.indexOf('denied') >= 0, 'Device permission feedback');
-        check(byId('sync').disabled && byId('state').textContent.indexOf('PicCap') >= 0, 'Unavailable input gating');
+        check(byId('sourceHelp').textContent.indexOf('Grant Homebrew') >= 0, 'Device permission feedback');
+        check(byId('sync').disabled && byId('state').textContent.indexOf('permission') >= 0, 'Unavailable input gating');
         byId('piccap').click();
     },
     function () {

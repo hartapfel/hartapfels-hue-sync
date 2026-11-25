@@ -14,10 +14,10 @@ function deferred() {
 }
 
 // One capture owner and one bridge stream at a time, including while stopping.
-module.exports = function createSession(launch) {
+module.exports = function createSession(launch, feed) {
     var current = null, lastError = null;
-    launch = launch || function () {
-        return spawn(path.join(__dirname, 'c9-sync'), ['--service'], { stdio: ['pipe', 'ignore', 'pipe', 'pipe'] });
+    launch = launch || function (zones) {
+        return spawn(path.join(__dirname, 'c9-sync'), ['--service'], { stdio: ['pipe', 'ignore', 'pipe', 'pipe', zones ? 'pipe' : 'ignore'] });
     };
 
     function status() {
@@ -26,9 +26,14 @@ module.exports = function createSession(launch) {
         return state;
     }
 
+    function stopFeed(s) {
+        if (s.stopFeed) { var cancel = s.stopFeed; s.stopFeed = null; cancel(); }
+    }
+
     function finish(s, error) {
         if (s.finishing) return;
         s.finishing = true;
+        stopFeed(s);
         clearTimeout(s.deadline);
         clearTimeout(s.killTimer);
         s.state = 'stopping';
@@ -50,6 +55,7 @@ module.exports = function createSession(launch) {
         if (s.finishing || s.state === 'stopping') return;
         s.state = 'stopping';
         s.failure = error;
+        stopFeed(s);
         clearTimeout(s.deadline);
         if (s.child) {
             if (!s.child.stdin.finished) s.child.stdin.end();
@@ -67,8 +73,10 @@ module.exports = function createSession(launch) {
         lastError = null;
         Promise.resolve().then(function () { return client.layout(area); }).then(function (layout) {
             if (s.state === 'stopping') return finish(s, s.failure);
+            var zones = capture.source === 'direct' && !!feed;
+            if (zones) capture.source = 'zones';
             var descriptor = encode(bridge, keys, layout, capture, 2100);
-            s.child = launch();
+            s.child = launch(zones);
             var pending = '', diagnostic = '', granted = false;
             function activate() {
                 s.activation = client.start(area);
@@ -101,7 +109,7 @@ module.exports = function createSession(launch) {
                 if (s.state !== 'stopping' && !error) {
                     var deviceUnavailable = exitCode === 77 ||
                         /DILE capture device access denied|Creating handle to \/dev\/mem failed/.test(diagnostic);
-                    var message = deviceUnavailable ? 'The native capture device is unavailable to this app. Select PicCap stream.' :
+                    var message = deviceUnavailable ? 'The native capture device is unavailable to the Screen Sync capture service.' :
                         /handshake failed/.test(diagnostic) ? 'The Hue stream handshake failed.' :
                         /DILE capture start failed|DILE capture initialization failed/.test(diagnostic) ?
                             'LG capture could not start. Pause PicCap capture and try Direct TV capture again.' :
@@ -144,6 +152,7 @@ module.exports = function createSession(launch) {
                 if (!s.activation) error.code = 'VIDEO_NOT_READY';
                 terminate(s, error);
             }, 45000);
+            if (zones) s.stopFeed = feed.stream(s.child.stdio[4], function (err) { terminate(s, err); });
             s.child.stdin.write(s.controls);
             s.child.stdin.write(descriptor, function () { descriptor.fill(0); });
         }).catch(function (err) {

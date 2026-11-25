@@ -33,11 +33,12 @@ def archive(path):
     return members
 
 
-def verify(package, app, service, appid, version):
+def verify(package, app, service, capture, appid, version):
     archives = archive(package)
     with tarfile.open(fileobj=io.BytesIO(archives["data.tar.gz"])) as data:
         files = {m.name.removeprefix("./"): m for m in data if m.isfile()}
-        for source, dest in [(app, "applications/" + appid), (service, "services/" + appid + ".service")]:
+        for source, dest in [(app, "applications/" + appid), (service, "services/" + appid + ".service"),
+                             (capture, "services/" + appid + ".capture")]:
             for entry in source.iterdir():
                 if entry.name == "package.properties":
                     continue
@@ -47,14 +48,15 @@ def verify(package, app, service, appid, version):
                     assert json.loads(content) == json.loads(entry.read_bytes()), entry.name
                 else:
                     assert content == entry.read_bytes(), entry.name
-                if entry.name in ("c9-sync", "libc9_hue_stream.so", BACKEND):
+                if entry.name in ("c9-sync", "c9-capture-zones", "libc9_hue_stream.so", BACKEND):
                     assert content[:6] == b"\x7fELF\x01\x01" and struct.unpack_from("<H", content, 18)[0] == 40
-                if entry.name == "c9-sync":
+                if entry.name in ("c9-sync", "c9-capture-zones"):
                     assert item.mode & 0o111 == 0o111, oct(item.mode)
         manifest = files["usr/palm/packages/" + appid + "/packageinfo.json"]
         info = json.load(data.extractfile(manifest))
         assert info["id"] == appid and info["version"] == version
         assert appid in info["app"] and appid + ".service" in info["services"]
+        assert appid + ".capture" in info["services"]
         assert all("HueSync.exe" not in name and "settings.json" not in name for name in files)
     with tarfile.open(fileobj=io.BytesIO(archives["control.tar.gz"])) as control:
         item = next(m for m in control if m.name.removeprefix("./") == "control")
@@ -79,6 +81,8 @@ def main():
         work = Path(work)
         app = Path(shutil.copytree(ROOT / "app", work / "app"))
         service = Path(shutil.copytree(ROOT / "service", work / "service"))
+        capture = Path(shutil.copytree(ROOT / "capture-service", work / "capture"))
+        shutil.copyfile(args.arm / "c9-capture-zones", capture / "c9-capture-zones")
         for name in ("c9-sync", "libc9_hue_stream.so"):
             shutil.copyfile(args.arm / name, service / name)
         with tarfile.open(fileobj=io.BytesIO(archive(args.piccap_ipk)["data.tar.gz"])) as data:
@@ -87,14 +91,15 @@ def main():
             if hashlib.sha256(backend).hexdigest() != BACKEND_SHA256:
                 raise ValueError("Expected the DILE backend from the PicCap 0.5.3 release")
             (service / BACKEND).write_bytes(backend)
+            (capture / BACKEND).write_bytes(backend)
         shutil.copyfile(args.mbedtls / "LICENSE", service / "LICENSE-mbedTLS.txt")
         shutil.copyfile(args.flatbuffers / "LICENSE", service / "LICENSE-FlatBuffers.txt")
         for name in ("libcxx", "libcxxabi", "libunwind"):
             shutil.copyfile(args.zig_lib / name / "LICENSE.TXT", service / ("LICENSE-" + name + ".txt"))
-        subprocess.run(["node", str(args.ares_js.resolve()), str(app), str(service),
+        subprocess.run(["node", str(args.ares_js.resolve()), str(app), str(service), str(capture),
                         "--no-minify", "--outdir", str(work)], check=True)
         package, = work.glob("*.ipk")
-        verify(package, app, service, appid, version)
+        verify(package, app, service, capture, appid, version)
         dest = args.output / package.name
         shutil.copyfile(package, dest)
         print(f"Verified {dest}\nSHA-256 {hashlib.sha256(dest.read_bytes()).hexdigest()}")

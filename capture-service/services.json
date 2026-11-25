@@ -1,0 +1,11 @@
+{
+  "id": "org.webosbrew.c9screensync.capture",
+  "services": [{
+    "name": "org.webosbrew.c9screensync.capture",
+    "description": "Sample the LG C9 video plane for Screen Sync",
+    "commands": [
+      {"name":"status","public":true},
+      {"name":"frames","public":true}
+    ]
+  }]
+}

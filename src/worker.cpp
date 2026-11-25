@@ -12,6 +12,7 @@
 #ifdef __linux__
 #include <sys/prctl.h>
 #include <sys/ioctl.h>
+#include <poll.h>
 #include <unistd.h>
 #elif defined(_WIN32)
 #define NOMINMAX
@@ -39,7 +40,7 @@ int cancelled(void *) { return stopping.load(std::memory_order_relaxed); }
 
 struct Session {
     capture_settings capture{};
-    uint8_t piccap{};
+    uint8_t source{}; // 0: in-process DILE, 1: PicCap TCP, 2: private zone pipe
     char host[64]{}, area[37]{}, identity[129]{};
     uint8_t key[16]{}, ids[256]{};
     uint16_t port{}, count{};
@@ -81,7 +82,7 @@ bool read_session(Session& session) {
     uint8_t h[17];
     if (!read_bytes(h, sizeof(h)) || std::memcmp(h, "C9S2", 4) ||
         h[11] > YUV_BT2020_NCL || h[12] > YUV_FULL ||
-        !read_bytes(&session.piccap, 1) || session.piccap > 1) return false;
+        !read_bytes(&session.source, 1) || session.source > 2) return false;
     session.port = u16(h + 4);
     session.capture = {u16(h + 6), u16(h + 8), h[10], yuv_matrix(h[11]), yuv_range(h[12])};
     session.count = u16(h + 13);
@@ -119,6 +120,50 @@ struct Video {
     int capture_result = 0;
 };
 
+void publish(Video& video, const Targets& next) {
+    // Publish only a complete frame. The DILE frame stays on the capture thread.
+    {
+        std::lock_guard<std::mutex> lock(video.mutex);
+        video.targets = next;
+        video.last_capture = Clock::now();
+    }
+    video.changed.notify_one();
+}
+
+#ifdef __linux__
+int receive_zones(Video& video) {
+    uint8_t frame[C9_ZONE_BYTES];
+    size_t filled = 0;
+    pollfd input{4, POLLIN, 0};
+    while (!cancelled(nullptr)) {
+        int ready = poll(&input, 1, 100);
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready < 0) return -1;
+        if (!ready) continue;
+        ssize_t count = read(input.fd, frame + filled, sizeof(frame) - filled);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) return -1;
+        filled += static_cast<size_t>(count);
+        if (filled != sizeof(frame)) continue;
+        filled = 0;
+        Targets next{};
+        unsigned threshold = presets[video.intensity.load()].threshold;
+        for (unsigned i = 0; i < next.size(); ++i) {
+            if (!(video.session.used & (1u << i))) continue;
+            bitmap_result sample{};
+            for (unsigned k = 0; k < 3; ++k) {
+                sample.average[k] = frame[6*i + k];
+                sample.trimean[k] = frame[6*i + 3 + k];
+            }
+            c9_video_accept(&video.regions[i], &sample, 255.f, threshold);
+            next[i] = video.regions[i].trimean;
+        }
+        publish(video, next);
+    }
+    return 0;
+}
+#endif
+
 int ingest(const capture_bitmap *frame, void *context) {
     auto& video = *static_cast<Video *>(context);
     Targets next{};
@@ -132,13 +177,7 @@ int ingest(const capture_bitmap *frame, void *context) {
         if (!c9_video_ingest_preset(&video.regions[i], frame, picture, areas[i].screen, 5000, &samples, threshold)) return -1;
         next[i] = video.regions[i].trimean;
     }
-    // Publish only a complete frame. The DILE frame stays on the capture thread.
-    {
-        std::lock_guard<std::mutex> lock(video.mutex);
-        video.targets = next;
-        video.last_capture = Clock::now();
-    }
-    video.changed.notify_one();
+    publish(video, next);
     return 0;
 }
 
@@ -148,7 +187,7 @@ bool await_bridge(Video& video) {
         const auto deadline = Clock::now() + std::chrono::seconds(10);
         while (video.last_capture == Clock::time_point{} && !video.done && !cancelled(nullptr)) {
             if (Clock::now() >= deadline) {
-                std::fputs(video.session.piccap ? "No PicCap input on localhost port 19401\n" :
+                std::fputs(video.session.source == 1 ? "No PicCap input on localhost port 19401\n" :
                            "No video frame received during startup\n", stderr);
                 return false;
             }
@@ -244,7 +283,7 @@ int stream_video(Video& video, hue_stream *stream) {
         }
     }
     if (cancelled(nullptr)) return 0;
-    std::fputs(video.session.piccap ? "No PicCap input on localhost port 19401\n" :
+    std::fputs(video.session.source == 1 ? "No PicCap input on localhost port 19401\n" :
                "No video frame received for five seconds\n", stderr);
     return 1;
 }
@@ -285,13 +324,13 @@ int main(int argc, char **argv) {
         if (!read_controls(session.brightness, session.intensity)) return 2;
         wait_for_bridge = true;
     }
-    if (!read_session(session)) {
+    if (!read_session(session) || (session.source == 2 && session.status_output == stdout)) {
         std::fputs("Invalid screen sync session descriptor\n", stderr);
         return 2;
     }
 #ifdef __linux__
     // Check from the worker's own context before initializing LG capture.
-    if (!session.piccap && session.status_output != stdout && access("/dev/mem", R_OK | W_OK) != 0 &&
+    if (!session.source && session.status_output != stdout && access("/dev/mem", R_OK | W_OK) != 0 &&
         (errno == EACCES || errno == EPERM || errno == ENOENT || errno == ENOTDIR)) {
         std::fputs("Native capture device unavailable to this worker\n", stderr);
         return 77; // EX_NOPERM; the service can explain this even if a library fills stderr.
@@ -299,8 +338,12 @@ int main(int argc, char **argv) {
 #endif
     Video video(session);
     std::thread capture([&] {
-        auto capture_source = session.piccap ? c9_receive_piccap : c9_capture_video;
-        int result = capture_source(&session.capture, ingest, &video, cancelled);
+        auto capture_source = session.source == 1 ? c9_receive_piccap : c9_capture_video;
+        int result =
+#ifdef __linux__
+            session.source == 2 ? receive_zones(video) :
+#endif
+            capture_source(&session.capture, ingest, &video, cancelled);
         if (result) std::fprintf(stderr, "Video capture failed (%d)\n", result);
         std::lock_guard<std::mutex> lock(video.mutex);
         video.capture_result = result;

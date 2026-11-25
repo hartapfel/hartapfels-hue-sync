@@ -92,6 +92,8 @@ def add_fixture(vm, temp, args):
     vm.add("capture-fixture", mode=stat.S_IFDIR | 0o755)
     vm.add("capture-fixture/" + BACKEND, args.test_backend.read_bytes(), stat.S_IFREG | 0o755)
     with tarfile.open(fileobj=io.BytesIO(archive(args.ipk)["data.tar.gz"])) as tar:
+        item, = [m for m in tar if m.name.endswith(".capture/c9-capture-zones")]
+        vm.add("capture-fixture/c9-capture-zones", tar.extractfile(item).read(), stat.S_IFREG | item.mode)
         for filename in ("c9-sync", "libc9_hue_stream.so", "worker-session.js", BACKEND):
             item, = [m for m in tar if m.name.endswith(".service/" + filename)]
             content = tar.extractfile(item).read()
@@ -113,6 +115,9 @@ def add_fixture(vm, temp, args):
         config[2]["channels"] = json.loads(args.chart_reference.read_text())["channels"]
         assert len(config[2]["channels"]) == 14
         vm.add("fixture/chart-descriptor", subprocess.check_output(["node", "-e", script, json.dumps(config)], cwd=temp))
+        config[3]["source"] = "zones"
+        vm.add("fixture/zones-descriptor", subprocess.check_output(["node", "-e", script, json.dumps(config)], cwd=temp))
+
 
     def packet(name, kind, fields):
         src = temp / (name + ".json")
@@ -177,9 +182,9 @@ def verify(log, expected):
           f"The packaged worker delivered {len(frames)} decrypted two-channel frames.")
 
 
-def verify_chart_stream(log, reference):
+def verify_chart_stream(log, reference, source="CHART"):
     assert reference.get("brightnessPercent") == 100, "Regenerate the chart reference at desktop maximum brightness"
-    match = re.search(r"C9-CHART-STREAM\s+(\d+)\s+([A-Za-z0-9+/=\s]+?)\s+C9-CHART-END", log)
+    match = re.search(rf"C9-{source}-STREAM\s+(\d+)\s+([A-Za-z0-9+/=\s]+?)\s+C9-{source}-END", log)
     assert match, "Missing chart stream"
     count, remainder = divmod(int(match[1]), 150)
     endpoints = base64.b64decode("".join(match[2].split()), validate=True)
@@ -195,7 +200,7 @@ def verify_chart_stream(log, reference):
             error = max(abs(a-b) for a, b in zip(actual[1:], target[1:]))
             assert error <= tolerance, (key, actual, target, error)
             worst = max(worst, error)
-        print(f"14-channel chart {key} frame: maximum difference {worst} RGB16 codes from desktop")
+        print(f"{source} 14-channel chart {key} frame: maximum difference {worst} RGB16 codes from desktop")
 
 
 def main():
@@ -222,11 +227,12 @@ def main():
                                  "-nodefaults", "-display", "none", "-monitor", "none", "-serial", "stdio",
                                  "-nic", "none", "-no-reboot", "-kernel", args.assets / "vmlinuz", "-initrd", initrd,
                                  "-append", "console=ttyAMA0 rdinit=/init panic=-1 loglevel=3"],
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=90)
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=130)
         log = result.stdout.decode(errors="replace")
         verify(log, expected)
         if args.chart_reference:
-            verify_chart_stream(log, json.loads(args.chart_reference.read_text()))
+            for source in ("CHART", "ZONES"):
+                verify_chart_stream(log, json.loads(args.chart_reference.read_text()), source)
         if args.desktop_vectors:
             summary = next(line for line in log.splitlines() if line.startswith("Desktop ticks "))
             assert int(summary.split()[2]) == len(vectors)//40

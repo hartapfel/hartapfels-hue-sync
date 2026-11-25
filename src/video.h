@@ -29,6 +29,12 @@ struct video_region_state {
 int c9_region_grid(unsigned width, unsigned height, struct screen_rect screen,
                    unsigned max_samples, struct bitmap_region *region, unsigned *budget);
 
+enum { C9_ZONE_BYTES = C9_VIDEO_AREA_COUNT * 6 };
+int c9_video_sample(const struct capture_bitmap *frame, struct bitmap_region picture,
+                    struct screen_rect screen, unsigned max_samples, struct bitmap_result *result);
+void c9_video_accept(struct video_region_state *state, const struct bitmap_result *result,
+                     float max_code, unsigned compare_threshold);
+
 // Capture and interpolation run at independent rates. Zero-initialize one
 // state per zone, ingest on capture, then tick at the interpolation rate.
 int c9_video_ingest(struct video_region_state *state, const struct capture_bitmap *frame,

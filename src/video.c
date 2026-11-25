@@ -98,27 +98,39 @@ int c9_video_ingest_preset(struct video_region_state *state, const struct captur
                            struct bitmap_region picture, struct screen_rect screen,
                            unsigned max_samples, unsigned *samples, unsigned compare_threshold)
 {
+    struct bitmap_result result = {0};
+    if (!state || !samples || !c9_video_sample(frame, picture, screen, max_samples, &result)) return 0;
+    *samples = result.samples;
+    c9_video_accept(state, &result, frame->layout == RGB10A2 ? 1023.f : 255.f, compare_threshold);
+    return 1;
+}
+
+int c9_video_sample(const struct capture_bitmap *frame, struct bitmap_region picture,
+                    struct screen_rect screen, unsigned max_samples, struct bitmap_result *result)
+{
     struct bitmap_region region;
     unsigned budget;
-    if (!frame || !state || !samples || picture.width > frame->width || picture.height > frame->height ||
+    if (!frame || !result || picture.width > frame->width || picture.height > frame->height ||
         picture.x > frame->width - picture.width || picture.y > frame->height - picture.height ||
         !c9_region_grid(picture.width, picture.height, screen, max_samples, &region, &budget))
         return 0;
     region.x += picture.x;
     region.y += picture.y;
-    struct bitmap_result result = {0};
-    if (budget && !analyze_region(frame, region, budget, &result)) return 0;
-    *samples = result.samples;
-    float max_code = frame->layout == RGB10A2 ? 1023.f : 255.f;
-    struct c9_rgb trimean = normalize(result.trimean, max_code);
-    struct c9_rgb average = normalize(result.average, max_code);
+    *result = (struct bitmap_result){0};
+    return !budget || analyze_region(frame, region, budget, result);
+}
+
+void c9_video_accept(struct video_region_state *state, const struct bitmap_result *result,
+                     float max_code, unsigned compare_threshold)
+{
+    struct c9_rgb trimean = normalize(result->trimean, max_code);
+    struct c9_rgb average = normalize(result->average, max_code);
     // Desktop retains both previous colors when either comparison is close.
     float tolerance = compare_threshold / 255.f;
     if (changed(state->trimean, trimean, tolerance) && changed(state->average, average, tolerance)) {
         state->trimean = trimean;
         state->average = average;
     }
-    return 1;
 }
 
 int c9_video_ingest(struct video_region_state *state, const struct capture_bitmap *frame,

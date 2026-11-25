@@ -78,7 +78,7 @@
         var waiting = idle && s.wakeRetry;
         var canStop = live || waiting || s.state === 'starting';
         var directDenied = s.source === 'direct' && s.directAccess === false;
-        el('state').textContent = idle && directDenied ? 'Select PicCap stream to sync' :
+        el('state').textContent = idle && directDenied ? 'Direct capture needs permission' :
             waiting ? 'Waiting to retry sync…' : labels[s.state] || 'Connecting…';
         renderControls();
         el('sync').textContent = canStop ? 'Stop sync' : 'Start sync';
@@ -96,7 +96,7 @@
         el('sourceHelp').textContent = s.source === 'piccap' ?
             'In PicCap, turn off Unix socket mode and send video to 127.0.0.1 on port 19401. Leave PicCap capture running.' :
             s.source === 'direct' && s.directAccess === false ?
-                'webOS denied this app access to the native capture device. Select PicCap stream and leave PicCap running.' :
+                'Grant Homebrew Channel permission to the Screen Sync capture service. The status updates when capture is available.' :
             s.source === 'direct' ? 'If PicCap is capturing, pause it so this app can use the TV capture device.' : '';
         el('pairHelp').textContent = s.bridge ? 'Paired with ' + s.bridge.name + ' (' + s.bridge.host + ').' :
             'Press the link button on your Hue Bridge, then choose Pair bridge.';

@@ -73,7 +73,7 @@ setImmediate(function () {
             var denied = controller(hue, store, session, function () { return Promise.resolve(false); });
             return denied.status().then(function (s) {
                 assert.strictEqual(s.directAccess, false);
-                return rejects(denied.start(), /Select PicCap/);
+                return rejects(denied.start(), /capture service/);
             });
         }).then(function () { return app.start(); })
         .then(function () {

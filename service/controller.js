@@ -2,26 +2,18 @@
 
 // This controller is shared by user-initiated requests and the boot callback.
 // Settings writes serialize with starts; stop always reaches a pending start.
-var fs = require('fs');
-function captureAccess() {
-    if (process.platform !== 'linux' && process.platform !== 'webos') return Promise.resolve(null);
-    return new Promise(function (resolve) {
-        fs.access('/dev/mem', fs.R_OK | fs.W_OK, function (err) {
-            resolve(!err ? true : ['EACCES','EPERM','ENOENT','ENOTDIR'].indexOf(err.code) >= 0 ? false : null);
-        });
-    });
-}
 module.exports = function controller(hue, store, session, checkAccess) {
     var settings, directAccess, writing = false;
     var loaded = store.load().then(function (value) {
         settings = value;
         if (settings.brightness === undefined) settings.brightness = 100;
         if (settings.intensity === undefined) settings.intensity = 1;
-        return (checkAccess || captureAccess)().then(function (value) {
-            directAccess = value;
-            if (!settings.source) settings.source = directAccess === false ? 'piccap' : 'direct';
-        });
+        if (!settings.source) settings.source = 'direct';
     });
+    function refreshAccess() {
+        if (!checkAccess || settings.source !== 'direct') return Promise.resolve();
+        return checkAccess().then(function (value) { directAccess = value; });
+    }
     function status() {
         var state = session.status();
         return { state: state.state, error: state.error, bridge: settings.bridge || null,
@@ -50,7 +42,7 @@ module.exports = function controller(hue, store, session, checkAccess) {
         return hue.connect(settings.bridge, settings.keys.applicationKey);
     }
     return {
-        status: function () { return loaded.then(status); },
+        status: function () { return loaded.then(refreshAccess).then(status); },
         pair: function (host) {
             return edit(function () {
                 return hue.identify(host).then(function (bridge) {
@@ -108,12 +100,12 @@ module.exports = function controller(hue, store, session, checkAccess) {
             }, true);
         },
         start: function () {
-            return loaded.then(function () {
+            return loaded.then(refreshAccess).then(function () {
                 if (writing) throw Error('Bridge setup is in progress.');
                 var connection = client();
                 if (!settings.area) throw Error('Select an entertainment area first.');
                 if (settings.source === 'direct' && directAccess === false) {
-                    var error = Error('webOS denied this app access to the native capture device. Select PicCap stream.');
+                    var error = Error('Grant Homebrew Channel permission to the Screen Sync capture service, then start sync again.');
                     error.code = 'CAPTURE_ACCESS_DENIED';
                     throw error;
                 }

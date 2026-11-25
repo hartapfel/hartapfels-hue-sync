@@ -40,7 +40,13 @@ test_package() {
 
     test_stream split || return 1
     test_stream controls || return 1
-    if [ -f chart-descriptor ]; then test_stream chart || return 1; fi
+    if [ -f chart-descriptor ]; then
+        test_stream chart || return 1
+        # The fixture deliberately ends with an error after eight valid frames.
+        /capture-fixture/c9-capture-zones 3>zones.raw 2>zones.err
+        [ "$(wc -c <zones.raw)" -eq 672 ] || return 1
+        test_stream zones || return 1
+    fi
     return 0
 }
 
@@ -71,19 +77,26 @@ feed_frames() {
 
 test_stream() {
     descriptor=descriptor
-    if [ "$1" = chart ]; then descriptor=chart-descriptor; fi
+    if [ "$1" = chart ] || [ "$1" = zones ]; then descriptor="$1-descriptor"; fi
     mkfifo peer.in worker.in
     exec 4<>worker.in
-    if [ "$1" = controls ] || [ "$1" = chart ]; then
+    if [ "$1" = zones ]; then
+        mkfifo frame.in
+        /app/c9-sync --service <worker.in >firmware.out 2>session.err 3>session.out 4<frame.in &
+    elif [ "$1" = controls ] || [ "$1" = chart ]; then
         /app/c9-sync --service <worker.in >firmware.out 2>session.err 3>session.out &
     else
         /app/c9-sync --wait-for-bridge <worker.in >session.out 2>session.err &
     fi
     child=$!
-    if [ "$1" = controls ] || [ "$1" = chart ]; then printf '\144\001' >&4; fi
+    if [ "$1" != split ]; then printf '\144\001' >&4; fi
     cat "$descriptor" >&4
-    wait_port && [ ! -s session.out ] || return 1
-    feed_frames "$1" | nc -w 2 127.0.0.1 19401 >acks &
+    if [ "$1" = zones ]; then
+        (for i in $(seq 1 95); do head -c 84 zones.raw; sleep .2; done) >frame.in &
+    else
+        wait_port && [ ! -s session.out ] || return 1
+        feed_frames "$1" | nc -w 2 127.0.0.1 19401 >acks &
+    fi
     for i in $(seq 1 100); do grep -qx video-ready session.out && break; sleep .05; done
     [ "$(cat session.out)" = video-ready ] || return 1
     # Start the bridge peer only after the worker has processed a real frame.
@@ -105,15 +118,17 @@ test_stream() {
         printf '\062\003' >&4
     fi
     wait "$child"
-    [ "$?" = 1 ] && grep -q 'PicCap input disconnected' session.err || return 1
-    [ "$(cat session.out)" = "$(printf 'video-ready\nstreaming')" ] && [ -s acks ] || return 1
+    [ "$?" = 1 ] || return 1
+    if [ "$1" != zones ]; then grep -q 'PicCap input disconnected' session.err && [ -s acks ] || return 1; fi
+    [ "$(cat session.out)" = "$(printf 'video-ready\nstreaming')" ] || return 1
     wait "$peer" || return 1
-    if [ "$1" = chart ]; then
-        echo "C9-CHART-STREAM $(wc -c <packets)"
+    if [ "$1" = chart ] || [ "$1" = zones ]; then
+        marker=$(echo "$1" | tr a-z A-Z)
+        echo "C9-${marker}-STREAM $(wc -c <packets)"
         # One HueStream header and 14 RGB16 channel records per frame.
         head -c 150 packets | base64
         tail -c 150 packets | base64
-        echo C9-CHART-END
+        echo "C9-${marker}-END"
     elif [ "$1" = controls ]; then
         echo C9-CONTROLS-BEGIN
         base64 packets
