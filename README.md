@@ -26,6 +26,10 @@ python tests/desktop_color.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Rele
 
 The capture adapter loads the DILE video backend used by PicCap 0.5.3 and borrows each frame until analysis finishes. It supports RGB24, NV12 and NV16. Only pixels on the sampling grid undergo Y′CbCr decoding. Each region retains its position in the original chroma planes, including regions that start on an odd row or column. The matrix and video range are explicit inputs. Primaries and transfer-function conversion for HDR are still pending. [PicCap 0.5.3](https://github.com/TBSniller/piccap/releases/tag/0.5.3)
 
+In the reference executable, the Windows desktop duplication call at RVA `0x1b8d19` requests five DXGI formats (24, 28, 29, 87 and 91). They represent packed 10-bit RGB and four variants of 8-bit RGBA or BGRA. DXGI can convert a fullscreen surface before capture. The list establishes which pixel layouts the desktop app accepts, but it does not establish the transfer function of a C9 capture. [Microsoft DXGI duplication API](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_5/nf-dxgi1_5-idxgioutput5-duplicateoutput1) · [DXGI format definitions](https://learn.microsoft.com/en-us/windows/win32/api/dxgiformat/ne-dxgiformat-dxgi_format)
+
+PicCap's TCP image messages carry dimensions, pixel data and optional plane strides. PicCap reports the TV's HDR mode separately to HyperHDR's JSON API. To determine how the C9 capture represents HDR, compare captured code values from known HDR patches with the source values before choosing a conversion. [PicCap image schema](https://github.com/webosbrew/hyperion-webos/blob/00c932f092084b234b3f619b060a98fa134c12bd/fbs/hyperion_request.fbs) · [PicCap HDR reporting](https://github.com/webosbrew/hyperion-webos/blob/00c932f092084b234b3f619b060a98fa134c12bd/src/json_rpc_client.c)
+
 With Zig 0.13.0 and a checkout of `webosbrew/hyperion-webos` at `00c932f092084b234b3f619b060a98fa134c12bd`, the following PowerShell commands cross-compile the checker locally and test the linked ARM code. Set `$piccap` to that checkout.
 
 ```powershell
