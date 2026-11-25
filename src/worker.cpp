@@ -169,7 +169,9 @@ int stream_video(Video& video, hue_stream *stream) {
 }
 }
 
-int main() {
+int measure_piccap_chart(capture_cancelled interrupted);
+
+int main(int argc, char **argv) {
     signal(SIGTERM, stop);
     signal(SIGINT, stop);
 #ifdef __linux__
@@ -177,6 +179,9 @@ int main() {
 #elif defined(_WIN32)
     _setmode(_fileno(stdin), _O_BINARY);
 #endif
+    if (argc == 2 && std::strcmp(argv[1], "--measure-hdr-chart") == 0)
+        return measure_piccap_chart(cancelled);
+    if (argc != 1) return 2;
     Session session;
     if (!read_session(session)) {
         std::fputs("Invalid screen sync session descriptor\n", stderr);

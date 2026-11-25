@@ -30,6 +30,16 @@ In the reference executable, the Windows desktop duplication call at RVA `0x1b8d
 
 PicCap's TCP image messages carry dimensions, pixel data and optional plane strides. PicCap reports the TV's HDR mode separately to HyperHDR's JSON API. To determine how the C9 capture represents HDR, compare captured code values from known HDR patches with the source values before choosing a conversion. [PicCap image schema](https://github.com/webosbrew/hyperion-webos/blob/00c932f092084b234b3f619b060a98fa134c12bd/fbs/hyperion_request.fbs) · [PicCap HDR reporting](https://github.com/webosbrew/hyperion-webos/blob/00c932f092084b234b3f619b060a98fa134c12bd/src/json_rpc_client.c)
 
+### Measuring an HDR10 capture on the C9
+
+Generate the 15-second HEVC Main 10 chart with `python tests/hdr_chart.py ffmpeg build/c9-hdr10-chart.mp4` and an FFmpeg build with 10-bit libx265. It contains a marker row, twelve gray patches from black through 1,000 cd/m², and six BT.2020 color patches. The generator decodes the file and checks all patch centers at three timestamps. The PQ reference and narrow-range encoding follow [ITU-R BT.2100](https://www.itu.int/rec/R-REC-BT.2100).
+
+1. Stop standalone sync. Point PicCap at TCP `127.0.0.1:19401`. Use the HDMI or player input under investigation and play the chart full-screen with HDR10 output. The C9 should indicate HDR playback.
+2. In a Dev Manager TV terminal, change into the installed `org.webosbrew.c9screensync.service` directory and run `./c9-sync --measure-hdr-chart`. The worker waits up to 90 seconds. Loop the clip if needed. This mode opens the PicCap receiver and works without Hue credentials.
+3. Save its single JSON output line on the PC and run `python tests/read_hdr_chart.py measurement.json`. It lists raw gray values and reports deviations from unmodified full- and limited-range PQ for the gray and color patches. Agreement supports that interpretation for that playback path. A large residual requires further investigation of capture or playback processing.
+
+The worker samples five interior points per tile, requires the marker and eight stable frames, and reports raw RGB or Y/Cb/Cr averages before matrix conversion or sync grading. The local test decodes the generated clip, sends RGB24 and padded NV12 through the PicCap protocol, interrupts a run of seven chart frames with a blank frame, and checks all 24 triples for both formats.
+
 With Zig 0.13.0 and a checkout of `webosbrew/hyperion-webos` at `00c932f092084b234b3f619b060a98fa134c12bd`, the following PowerShell commands cross-compile the checker locally and test the linked ARM code. Set `$piccap` to that checkout.
 
 ```powershell
@@ -104,4 +114,4 @@ The packaging script checks the app and service manifests, ARM payloads, executa
 
 **Start sync on power-on** is off by default. Enabling it checks access to the TV's power state before registering a persistent webOS activity. A fresh service handles cold boot. During Quick Start standby, it listens for the panel to wake, then requests the selected area. The service releases its session on standby. The local lifecycle tests exercise both paths with simulated webOS responses. A real cold boot and remote-control wake are required to confirm the C9 firmware delivers those callbacks. [LG Activity Manager](https://webostv.developer.lge.com/develop/references/activity-manager)
 
-End-to-end comparisons still need the effect inputs to the mixer and the HDR capture behavior. Live pairing with a dedicated app identity, live bridge output, measured capture cost and boot and standby recovery still require device tests. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)
+The desktop comparisons cover the ordinary video effect and mixer. A comparison from a real HDR source through to the physical bridge is still pending. Live pairing with a dedicated app identity, capture cost, cold boot and standby recovery also require device tests. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)
