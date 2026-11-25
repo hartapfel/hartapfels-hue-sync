@@ -8,8 +8,8 @@ var name = 'C9 Screen Sync on power-on';
 // The activity never requests a power lock.
 module.exports = function autoStart(service, app, session, start) {
     var owner, sub, active, skipInitial = false, changing = false;
-    var retry, reconnect, generation = 0, lastError = null;
-    function cancelRetry() { ++generation; clearTimeout(retry); }
+    var retry, reconnect, pendingStart, generation = 0, lastError = null, suppressed = false;
+    function cancelRetry() { ++generation; clearTimeout(retry); retry = null; }
     function call(uri, params) {
         return new Promise(function (resolve, reject) {
             service.call(uri, params, function (msg) {
@@ -21,17 +21,26 @@ module.exports = function autoStart(service, app, session, start) {
         });
     }
     function onActive(token, attempt) {
-        if (!owner || !active || generation !== token) return;
+        if (!owner || !active || suppressed || generation !== token) return;
         app.status().then(function (s) {
             if (!owner || !active || generation !== token || !s.autoStart || !s.area) return;
             if (s.state === 'stopping') return session.whenEnded().then(function () { onActive(token, attempt); });
-            if (s.state === 'idle') return start().then(function () { if (generation === token) lastError = null; });
+            // A replacement power subscription can arrive before the original
+            // start has settled. The new watcher inherits that attempt.
+            if (pendingStart) return pendingStart;
+            if (s.state === 'idle') {
+                pendingStart = start().then(function () { pendingStart = null; lastError = null; },
+                    function (err) { pendingStart = null; throw err; });
+                return pendingStart;
+            }
         }).catch(function (err) {
             if (!owner || !active || generation !== token) return;
             lastError = err.message;
-            if (attempt < 4 && err.code !== 'AREA_BUSY') {
-                retry = setTimeout(function () { onActive(token, attempt + 1); }, [2000, 5000, 10000, 20000][attempt]);
-            }
+            var transient = /^(VIDEO_NOT_READY|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ENETDOWN|HTTP_50[234])$/.test(err.code);
+            if (err.code === 'AREA_BUSY' || (!transient && attempt >= 4)) { suppressed = true; return; }
+            var delays = [2000, 5000, 10000, 20000, 30000];
+            retry = setTimeout(function () { retry = null; onActive(token, attempt + 1); },
+                delays[Math.min(attempt, delays.length - 1)]);
         });
     }
     function unwatch() {
@@ -42,6 +51,7 @@ module.exports = function autoStart(service, app, session, start) {
     }
     function watch() {
         var mine = service.subscribe(power, {subscribe: true});
+        var first = true;
         sub = mine;
         function lost() {
             if (sub !== mine || !owner) return;
@@ -54,13 +64,22 @@ module.exports = function autoStart(service, app, session, start) {
             if (sub !== mine) return;
             var p = msg.payload;
             if (!p || !p.returnValue) return lost();
-            var awake = p.state === 'Active';
-            if (!awake && ['Active Standby', 'Suspend', 'Power Off', 'Screen Off'].indexOf(p.state) < 0) return;
-            if (awake === active) return;
+            var awake = p.state === 'Active' && p.onOff !== 'off';
+            if (awake && p.processing) return; // Wait for a settled Active notification.
+            if (!awake && p.onOff !== 'off' &&
+                    ['Active Standby', 'Suspend', 'Power Off', 'Screen Off'].indexOf(p.state) < 0) return;
+            var resume = first && active === true && awake;
+            first = false;
+            if (awake === active && !resume) return;
             active = awake;
             cancelRetry(); lastError = null;
-            if (awake && !skipInitial) onActive(generation, 0);
-            if (!awake) session.stop();
+            if (awake) {
+                if (skipInitial) suppressed = true;
+                onActive(generation, 0);
+            } else {
+                suppressed = false;
+                session.stop();
+            }
             skipInitial = false;
         });
     }
@@ -118,7 +137,8 @@ module.exports = function autoStart(service, app, session, start) {
                 changing = false; lastError = null; return app.status();
             }, function (err) { changing = false; throw err; });
         },
-        manualStop: cancelRetry,
+        manualStop: function () { cancelRetry(); suppressed = true; lastError = null; },
+        waiting: function () { return !!retry; },
         error: function () { return lastError; }
     };
 };

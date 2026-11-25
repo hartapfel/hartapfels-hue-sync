@@ -110,6 +110,32 @@ int ingest(const capture_bitmap *frame, void *context) {
     return 0;
 }
 
+bool await_bridge(Video& video) {
+    {
+        std::unique_lock<std::mutex> lock(video.mutex);
+        const auto deadline = Clock::now() + std::chrono::seconds(10);
+        while (video.last_capture == Clock::time_point{} && !video.done && !cancelled(nullptr)) {
+            if (Clock::now() >= deadline) {
+                std::fputs(video.session.piccap ? "No PicCap input on localhost port 19401\n" :
+                           "No video frame received during startup\n", stderr);
+                return false;
+            }
+            video.changed.wait_for(lock, std::chrono::milliseconds(100));
+        }
+        if (video.done || cancelled(nullptr)) return false;
+    }
+    // No capture frame or mutex is held while the service activates the area.
+    std::puts("video-ready");
+    std::fflush(stdout);
+    if (std::fgetc(stdin) != 1 || cancelled(nullptr)) return false;
+    std::lock_guard<std::mutex> lock(video.mutex);
+    if (video.done || Clock::now() - video.last_capture >= std::chrono::seconds(5)) {
+        std::fputs("No video frame available after bridge activation\n", stderr);
+        return false;
+    }
+    return true;
+}
+
 int stream_video(Video& video, hue_stream *stream) {
     const auto tick = std::chrono::nanoseconds(1000000000 / 60);
     const auto send = std::chrono::milliseconds(20);
@@ -199,19 +225,12 @@ int main(int argc, char **argv) {
         if (argc == 3 && std::strcmp(argv[2], "direct") == 0) return measure_hdr_chart(true, cancelled);
         return 2;
     }
-    if (argc != 1) return 2;
+    bool wait_for_bridge = argc == 2 && std::strcmp(argv[1], "--wait-for-bridge") == 0;
+    if (argc != 1 && !wait_for_bridge) return 2;
     Session session;
     if (!read_session(session)) {
         std::fputs("Invalid screen sync session descriptor\n", stderr);
         return 2;
-    }
-    hue_stream *stream = nullptr;
-    int handshake = hue_stream_open(&stream, session.host, session.port, session.area, session.identity, session.key);
-    std::memset(session.key, 0, sizeof(session.key));
-    std::memset(session.identity, 0, sizeof(session.identity));
-    if (handshake) {
-        std::fprintf(stderr, "Hue stream handshake failed (%d)\n", handshake);
-        return 1;
     }
     Video video(session);
     std::thread capture([&] {
@@ -223,9 +242,19 @@ int main(int argc, char **argv) {
         video.done = true;
         video.changed.notify_one();
     });
-    int result = stream_video(video, stream);
+    int result = 1;
+    if (!wait_for_bridge || await_bridge(video)) {
+        hue_stream *stream = nullptr;
+        int handshake = hue_stream_open(&stream, session.host, session.port, session.area, session.identity, session.key);
+        std::memset(session.key, 0, sizeof(session.key));
+        std::memset(session.identity, 0, sizeof(session.identity));
+        if (handshake) std::fprintf(stderr, "Hue stream handshake failed (%d)\n", handshake);
+        else {
+            result = stream_video(video, stream);
+            hue_stream_close(stream);
+        }
+    }
     stop(0);
-    hue_stream_close(stream);
     capture.join();
     return result == 0 && video.capture_result == 0 ? 0 : 1;
 }

@@ -36,7 +36,22 @@ test_package() {
     wait "$child" && [ -s acks ] || return 1
     cat chart.out
 
-    mkfifo peer.in
+    mkfifo peer.in worker.in
+    exec 4<>worker.in
+    /app/c9-sync --wait-for-bridge <worker.in >session.out 2>session.err &
+    child=$!
+    cat descriptor >&4
+    wait_port && [ ! -s session.out ] || return 1
+    { cat register split
+      for i in $(seq 1 100); do
+          grep -qx streaming session.out && break
+          sleep .05; cat split
+      done
+      for i in $(seq 1 14); do cat split; sleep .05; done
+      for i in $(seq 1 14); do cat white; sleep .05; done; } | nc -w 2 127.0.0.1 19401 >acks &
+    for i in $(seq 1 100); do grep -qx video-ready session.out && break; sleep .05; done
+    [ "$(cat session.out)" = video-ready ] || return 1
+    # Start the bridge peer only after the worker has processed a real frame.
     exec 3<>peer.in
     openssl s_server -4 -dtls1_2 -quiet -nocert -naccept 1 -cipher PSK-AES128-GCM-SHA256 \
         -psk 00112233445566778899aabbccddeeff -psk_identity c9-worker-test -accept 127.0.0.1:2100 \
@@ -46,14 +61,10 @@ test_package() {
         grep -qi ':0834 ' /proc/net/udp && break
         sleep .05
     done
-    /app/c9-sync <descriptor >session.out 2>session.err &
-    child=$!
-    wait_port || return 1
-    { cat register; for i in $(seq 1 14); do cat split; sleep .05; done
-      for i in $(seq 1 14); do cat white; sleep .05; done; } | nc -w 2 127.0.0.1 19401 >acks
+    printf '\001' >&4
     wait "$child"
     [ "$?" = 1 ] && grep -q 'PicCap input disconnected' session.err || return 1
-    grep -qx streaming session.out && [ -s acks ] || return 1
+    [ "$(cat session.out)" = "$(printf 'video-ready\nstreaming')" ] && [ -s acks ] || return 1
     wait "$peer" || return 1
     echo C9-PACKETS-BEGIN
     base64 packets

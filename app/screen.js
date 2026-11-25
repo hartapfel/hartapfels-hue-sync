@@ -32,10 +32,12 @@
         var s = state || {}, idle = s.state === 'idle', live = s.state === 'streaming';
         var labels = { idle: s.area ? 'Ready to sync' : 'Set up screen sync', starting: 'Starting sync…',
             streaming: 'Syncing', stopping: 'Stopping sync…' };
-        el('state').textContent = labels[s.state] || 'Connecting…';
+        var waiting = idle && s.wakeRetry;
+        var canStop = live || waiting || s.state === 'starting';
+        el('state').textContent = waiting ? 'Waiting to retry sync…' : labels[s.state] || 'Connecting…';
         el('room').textContent = (s.area ? s.area.name + ' · ' : '') + 'Video · Moderate';
-        el('sync').textContent = live ? 'Stop sync' : 'Start sync';
-        el('sync').disabled = pending || !(live || (idle && s.area));
+        el('sync').textContent = canStop ? 'Stop sync' : 'Start sync';
+        el('sync').disabled = pending || !(canStop || (idle && s.area));
         el('pair').disabled = el('host').disabled = pending || !idle;
         el('reload').disabled = pending || !idle || !s.paired;
         el('boot').disabled = pending || (!s.autoStart && !s.area);
@@ -103,7 +105,7 @@
         action(function () { return call('setAutoStart', {enabled: !state.autoStart}).then(update); }, el('boot'));
     };
     el('sync').onclick = function () {
-        var method = state.state === 'streaming' ? 'stop' : 'start';
+        var method = state.wakeRetry || state.state === 'starting' || state.state === 'streaming' ? 'stop' : 'start';
         action(function () { return call(method).then(function () { return call('status'); }).then(update); }, el('sync'));
     };
     // Directional navigation also works on TVs with the Magic Remote pointer hidden.
@@ -124,6 +126,7 @@
         call('status').then(function (s) {
             if (pending) return;
             var first = !state;
+            if (state && state.error && !s.error && el('feedback').textContent === state.error) el('feedback').textContent = '';
             update(s);
             if (s.error) el('feedback').textContent = s.error;
             if (first) {

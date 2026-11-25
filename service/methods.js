@@ -35,6 +35,7 @@ module.exports = function register(service, app, session) {
     var boot = require('./autostart')(service, app, session, start);
     add('status', function () { return app.status().then(function (s) {
         if (!s.error) s.error = boot.error();
+        if (boot.waiting()) s.wakeRetry = true;
         return s;
     }); });
     add('pair', function (params) { return app.pair(params.host); });

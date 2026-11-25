@@ -14,21 +14,29 @@ function rejected(p, pattern) {
     });
 }
 
-function fixture(startArea, behavior) {
-    var f = { launched: 0, released: 0 };
+function fixture(startArea, behavior, layout) {
+    var f = { launched: 0, activated: 0, released: 0, grants: 0 };
     f.session = createSession(function () {
         ++f.launched;
         var child = new EventEmitter();
         child.stdin = new PassThrough();
         child.stdout = new PassThrough();
         child.stderr = new PassThrough();
-        child.stdin.on('data', function (buf) { assert.equal(buf.toString('ascii', 0, 4), 'C9S2'); });
+        child.stdin.on('data', function (buf) {
+            if (buf.length === 1) {
+                assert.equal(buf[0], 1);
+                ++f.grants;
+                child.stdout.write('stream'); child.stdout.write('ing\n');
+            } else assert.equal(buf.toString('ascii', 0, 4), 'C9S2');
+        });
         child.kill = function () { setImmediate(function () { child.emit('close', null); }); };
         setImmediate(function () { behavior(child); });
         return child;
     });
     f.start = function () {
-        return f.session.start({ start: startArea, stop: function (id) {
+        return f.session.start({ layout: layout || available, start: function (id) {
+            ++f.activated; return startArea(id);
+        }, stop: function (id) {
             assert.equal(id, area.id);
             ++f.released;
             return Promise.resolve();
@@ -37,7 +45,7 @@ function fixture(startArea, behavior) {
     return f;
 }
 function available() { return Promise.resolve(area); }
-function ready(child) { child.stdout.write('stream'); child.stdout.write('ing\n'); }
+function ready(child) { child.stdout.write('video-'); child.stdout.write('ready\n'); }
 
 function tests() {
     var first = fixture(available, ready);
@@ -45,6 +53,8 @@ function tests() {
     return rejected(first.start(), /already in progress/).then(function () { return start; })
         .then(function (status) {
             assert.equal(status.state, 'streaming');
+            assert.equal(first.activated, 1);
+            assert.equal(first.grants, 1);
             return Promise.all([first.session.stop(), first.session.stop()]);
         }).then(function () {
             assert.equal(first.released, 1);
@@ -53,7 +63,8 @@ function tests() {
             var cancelled = rejected(early.start(), /cancelled/);
             return Promise.all([cancelled, early.session.stop()]).then(function () {
                 assert.equal(early.launched, 0);
-                assert.equal(early.released, 1);
+                assert.equal(early.activated, 0);
+                assert.equal(early.released, 0);
             });
         }).then(function () {
             var failed = fixture(available, function (child) {
@@ -61,14 +72,39 @@ function tests() {
                 child.emit('close', 1);
             });
             return rejected(failed.start(), /TV capture failed/).then(function () {
-                assert.equal(failed.released, 1);
+                assert.equal(failed.activated, 0);
+                assert.equal(failed.released, 0);
                 assert.equal(failed.session.status().state, 'idle');
             });
         }).then(function () {
-            var failed = fixture(function () { return Promise.reject(Error('Bridge unavailable')); }, ready);
+            var failed = fixture(available, ready, function () { return Promise.reject(Error('Bridge unavailable')); });
             return rejected(failed.start(), /Bridge unavailable/).then(function () {
                 assert.equal(failed.launched, 0);
-                assert.equal(failed.released, 1);
+                assert.equal(failed.released, 0);
+            });
+        }).then(function () {
+            var confirm, begun;
+            var activating = new Promise(function (resolve) { begun = resolve; });
+            var slow = fixture(function () {
+                begun();
+                return new Promise(function (resolve) { confirm = resolve; });
+            }, ready);
+            var cancelled = rejected(slow.start(), /cancelled/);
+            return activating.then(function () {
+                var stopped = slow.session.stop();
+                return new Promise(function (resolve) { setImmediate(resolve); }).then(function () {
+                    assert.equal(slow.released, 0);
+                    confirm(area);
+                    return Promise.all([stopped, cancelled]);
+                });
+            }).then(function () { assert.equal(slow.grants, 0); assert.equal(slow.released, 1); });
+        }).then(function () {
+            var changed = fixture(function () {
+                return Promise.resolve({id:area.id, channels:[{id:3, x:1, y:1, z:0}]});
+            }, ready);
+            return rejected(changed.start(), /layout changed/).then(function () {
+                assert.equal(changed.grants, 0);
+                assert.equal(changed.released, 1);
             });
         });
 }

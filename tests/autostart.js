@@ -30,13 +30,60 @@ var app = {
     setAutoStart: function (enabled, id) { config.enabled = enabled; registration = id; return app.status(); }
 };
 var session = { stop: function () { ++stops; live = false; return app.status(); } };
-function init() { return create(service, app, session, function () { ++starts; live = true; return app.status(); }); }
+function init(start) { return create(service, app, session, start || function () { ++starts; live = true; return app.status(); }); }
 function fire(id) {
     callback({sender: 'com.webos.service.activitymanager', payload: {$activity: {activityId: 10}, registration: id},
         respond: function () { ++responds; }});
     return later();
 }
-function power(value) { sub.emit('response', {payload: {returnValue: true, state: value}}); return later(); }
+function power(value, onOff, processing) {
+    sub.emit('response', {payload: {returnValue: true, state: value, onOff: onOff, processing: processing}});
+    return later();
+}
+
+function lateWake() {
+    var set = global.setTimeout, clear = global.clearTimeout, timer, attempts = 0, failure = 'ETIMEDOUT';
+    global.setTimeout = function (fn, ms) { assert(!timer); timer = {fn:fn, ms:ms}; return timer; };
+    global.clearTimeout = function (item) { if (item === timer) timer = null; };
+    function advance(ms) {
+        assert(timer); assert.equal(timer.ms, ms);
+        var fn = timer.fn; timer = null; fn(); return later();
+    }
+    function restore() { global.setTimeout = set; global.clearTimeout = clear; }
+    var boot = init(function () {
+        ++attempts;
+        if (!failure) { live = true; return app.status(); }
+        var err = Error(failure); err.code = failure; return Promise.reject(err);
+    });
+    config.enabled = true; registration = 'saved'; live = false;
+    var checks = fire(registration).then(function () { return power('Active', 'on', 'Prepare Power On'); })
+        .then(function () { assert.equal(attempts, 0); return power('Active', 'on'); })
+        .then(function () { return advance(2000); })
+        .then(function () { return advance(5000); })
+        .then(function () { return advance(10000); })
+        .then(function () { failure = 'VIDEO_NOT_READY'; return advance(20000); })
+        .then(function () { return advance(30000); })
+        .then(function () {
+            assert(boot.waiting()); assert.equal(attempts, 6);
+            sub.cancel(); return advance(15000);
+        }).then(function () { failure = null; return power('Active', 'on'); })
+        .then(function () {
+            assert(live); assert.equal(attempts, 7);
+            return power('Active', 'off', 'Prepare Suspend');
+        }).then(function () {
+            assert(!live); failure = 'ETIMEDOUT'; return power('Active', 'on');
+        }).then(function () {
+            assert(boot.waiting()); boot.manualStop(); assert(!timer); assert(!boot.waiting());
+            sub.cancel(); return advance(15000);
+        }).then(function () { return power('Active', 'on'); })
+        .then(function () { assert.equal(attempts, 8); return power('Suspend'); })
+        .then(function () { failure = 'AREA_BUSY'; return power('Active'); })
+        .then(function () {
+            assert(!timer); assert.equal(attempts, 9); assert.equal(boot.error(), 'AREA_BUSY');
+            return boot.set(false);
+        });
+    return checks.then(restore, function (err) { restore(); throw err; });
+}
 setImmediate(function () {
     var boot = init();
     boot.set(true).then(function () {
@@ -73,6 +120,6 @@ setImmediate(function () {
             return boot.set(true).then(function () { throw Error('Expected creation failure'); }, function (err) {
                 assert(/unavailable/.test(err.message)); assert.equal(config.enabled, false);
             });
-        }).then(function () { console.log('Boot opt-in, wake, standby, cancellation and registration rollback passed on ' + process.version); })
+        }).then(lateWake).then(function () { console.log('Boot opt-in, delayed HDMI and bridge, power reconnect, standby and cancellation passed on ' + process.version); })
         .catch(function (err) { console.error(err.stack); process.exitCode = 1; });
 });

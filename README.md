@@ -112,7 +112,7 @@ The fixture uses these files in `build/arm-vm`:
 ```powershell
 cmake --build build/arm --target c9-test-capture-backend
 python tests/desktop_color.py 'C:/Program Files/Hue Sync/HueSync.exe' build/host-msvc/c9_bitmap.dll --arm-vectors build/arm-vm/desktop-ticks.bin
-python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.4.0_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb --desktop-vectors build/arm-vm/desktop-ticks.bin
+python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.4.1_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb --desktop-vectors build/arm-vm/desktop-ticks.bin
 ```
 
 The optional desktop vectors exercise 528 Video/Moderate ticks inside the worker extracted from the IPK. Each run carries its own history through multiple colors, including black, mixed tones and highlights. On the two ARM runtimes the maximum absolute channel error against the desktop was 0.00000011921 on a 0–1 scale.
@@ -135,6 +135,8 @@ python package.py --ares-js /path/to/ares-cli/bin/ares-package.js
 
 The packaging script checks the app and service manifests, ARM payloads, executable mode and release metadata before saving the IPK in `build/ipk`. Its inputs include Mbed TLS and the Zig runtime licenses. The TV setup screen and service use LG's JS service packaging model. [LG JS service guide](https://webostv.developer.lge.com/develop/guides/js-service-usage)
 
-**Start sync on power-on** is off by default. Enabling it checks access to the TV's power state before registering a persistent webOS activity. A fresh service handles cold boot. During Quick Start standby, it listens for the panel to wake, then requests the selected area. The service releases its session on standby. The local lifecycle tests exercise both paths with simulated webOS responses. A real cold boot and remote-control wake are required to confirm the C9 firmware delivers those callbacks. [LG Activity Manager](https://webostv.developer.lge.com/develop/references/activity-manager)
+**Start sync on power-on** is off by default. Enabling it registers a persistent webOS activity after checking access to the TV's power state. After cold boot or Quick Start wake, the service reads the selected layout and waits for the worker to process its first video frame. Only then does it request ownership and allow the DTLS handshake. If the network or video input is slow to appear, it retries with increasing delays up to 30 seconds between attempts. Choose **Stop sync** to cancel a pending wake retry. Standby cancels retries and releases the current session. If a different app owns the area, this wake attempt ends. [LG Activity Manager](https://webostv.developer.lge.com/develop/references/activity-manager)
+
+The local lifecycle tests replay delayed bridge and video availability, disconnection of the power subscription, an off transition while the previous state still reads Active, and cancellation during bridge activation. The ARM guest starts its test bridge only after the worker reports its first frame. A real cold boot and remote-control wake are required to confirm which power callbacks the C9 firmware delivers.
 
 The desktop comparisons cover the ordinary video effect and mixer. A comparison from a real HDR source through to the physical bridge is still pending. Live pairing with a dedicated app identity, capture cost, cold boot and standby recovery also require device tests. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)

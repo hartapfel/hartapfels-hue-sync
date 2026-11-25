@@ -45,7 +45,7 @@ function request(host, bridgeId, key, method, route, body) {
             var chunks = [];
             var size = 0;
             res.on('error', fail);
-            res.on('aborted', function () { fail(new Error('Bridge response interrupted.')); });
+            res.on('aborted', function () { fail(bridgeError('ECONNRESET', 'Bridge response interrupted.')); });
             res.on('data', function (chunk) {
                 size += chunk.length;
                 if (size > 1024 * 1024) {
@@ -73,7 +73,7 @@ function request(host, bridgeId, key, method, route, body) {
             reject(err);
         }
         var deadline = setTimeout(function () {
-            fail(new Error('Hue Bridge request timed out.'));
+            fail(bridgeError('ETIMEDOUT', 'Hue Bridge request timed out.'));
             req.abort();
         }, 5000);
         req.on('error', fail);
@@ -181,9 +181,9 @@ function connect(bridge, applicationKey) {
     function confirmStart(id, owner, retries) {
         return selected(id, true).then(function (area) {
             if (area.status === 'active' && area.owner === owner) return area;
-            if (!retries || (area.status === 'active' && area.owner && area.owner !== owner)) {
-                throw new Error('Bridge did not confirm stream ownership.');
-            }
+            if (area.status === 'active' && area.owner && area.owner !== owner)
+                throw bridgeError('AREA_BUSY', 'Another application is using this entertainment area.');
+            if (!retries) throw new Error('Bridge did not confirm stream ownership.');
             return new Promise(function (resolve) { setTimeout(resolve, 200); })
                 .then(function () { return confirmStart(id, owner, retries - 1); });
         });

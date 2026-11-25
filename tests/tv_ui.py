@@ -21,7 +21,7 @@ PalmServiceBridge.prototype.call = function (uri, raw) {
     } else if (method === 'areas') result = [area];
     else if (method === 'select') { if (p.id !== area.id) throw Error('Wrong area'); state.area = area; }
     else if (method === 'start') state.state = 'streaming';
-    else if (method === 'stop') state.state = 'idle';
+    else if (method === 'stop') { state.state = 'idle'; state.wakeRetry = false; }
     else if (method === 'setAutoStart') state.autoStart = p.enabled;
     else if (method === 'setSource') state.source = p.source;
     else if (method !== 'status') throw Error('Unexpected call ' + method);
@@ -71,6 +71,16 @@ var steps = [
     },
     function () {
         check(byId('state').textContent === 'Ready to sync', 'Returned to idle');
+        state.wakeRetry = true;
+        document.dispatchEvent(new Event('visibilitychange'));
+    },
+    function () {
+        check(byId('state').textContent === 'Waiting to retry sync…', 'Waiting for TV input');
+        check(byId('sync').textContent === 'Stop sync' && !byId('sync').disabled, 'Cancel wake retry');
+        byId('sync').click();
+    },
+    function () {
+        check(!state.wakeRetry && byId('state').textContent === 'Ready to sync', 'Wake retry cancelled');
         document.body.setAttribute('data-test-result','passed');
     }
 ];
