@@ -1,0 +1,8 @@
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR arm)
+find_program(C9_ZIG NAMES zig REQUIRED)
+find_program(CMAKE_AR NAMES llvm-ar REQUIRED)
+find_program(CMAKE_RANLIB NAMES llvm-ranlib REQUIRED)
+set(CMAKE_C_COMPILER "${C9_ZIG}")
+set(CMAKE_C_COMPILER_ARG1 cc)
+set(CMAKE_C_FLAGS_INIT "-target arm-linux-gnueabi.2.17 -mcpu=cortex_a9 -ffp-contract=off")

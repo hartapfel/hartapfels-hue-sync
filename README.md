@@ -1,6 +1,6 @@
 # C9 Screen Sync
 
-This standalone webOS project is porting the video path from the locally installed Hue Sync Desktop 1.13.1.83. The target is an LG C9 using local video capture and a Hue Entertainment area. The current build produces a processing library and an ARM video capture checker.
+This standalone webOS project is porting the video path from the locally installed Hue Sync Desktop 1.13.1.83. The target is an LG C9 using local video capture and a Hue Entertainment area. The current build produces processing and Hue streaming libraries and an ARM video capture checker.
 
 ## Desktop comparisons
 
@@ -35,6 +35,28 @@ python tests/desktop_video.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Rele
 
 The checker takes a capture width, height, frame rate, frame count, Y′CbCr matrix and range. It reports frame dimensions and strides, sample count, processing time across all 14 regions, and their final RGB targets. A live run requires the TV's existing video backend and exclusive use of capture. Windows and emulated ARM both passed 39 capture-plane comparisons, 1,296 frame-to-target cases, and 343 room-position checks against the desktop EDK's cuboid membership routine. Boundary points can belong to multiple cuboids.
 
+## Hue Entertainment stream
+
+The stream client sends RGB16 updates for the selected entertainment configuration over DTLS 1.2 using its paired application identity and client key. The caller activates the area before opening the stream and supplies each channel's bridge-assigned ID. The loopback test uses temporary credentials and an independent OpenSSL peer. It checks the decrypted payload of 258 frames, including channel order, component byte order and sequence wraparound.
+
+Unpack the official `mbedtls-3.6.7.tar.bz2` source archive in `build/`. Its SHA-256 is `a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6`. [Mbed TLS release](https://github.com/Mbed-TLS/mbedtls/releases/tag/mbedtls-3.6.7)
+
+Run the following in a Visual Studio x64 developer shell. The test command uses the MSYS OpenSSL executable from Git for Windows.
+
+```powershell
+$tls = (Resolve-Path build/mbedtls-3.6.7).Path
+cmake -S . -B build/host-msvc -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" "-DMBEDTLS_SOURCE_DIR=$tls"
+cmake --build build/host-msvc --target c9_hue_stream
+python tests/stream_loopback.py build/host-msvc/c9_hue_stream.dll 'C:/Program Files/Git/usr/bin/openssl.exe'
+```
+
+With Zig 0.13, Ninja, llvm-ar and llvm-ranlib on PATH, use the same sources to build for the TV. Set `$piccap` to the absolute path of the capture source checkout described above.
+
+```powershell
+cmake -S . -B build/arm -G Ninja -DCMAKE_BUILD_TYPE=Release --toolchain cmake/c9-zig.cmake "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" "-DMBEDTLS_SOURCE_DIR=$tls" "-DPICCAP_SOURCE_DIR=$piccap"
+cmake --build build/arm --target c9_hue_stream c9-capture-check
+```
+
 ## Integration status
 
-End-to-end comparisons still need the bridge channel positions, composition where multiple areas affect a channel, black-bar handling, and Entertainment output. Capture-side HDR encoding on the C9 needs its own check. An installer, measured capture cost, and opt-in boot and standby recovery are pending. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)
+End-to-end comparisons still need live bridge pairing and channel positions, composition where multiple areas affect a channel, black-bar handling, and final desktop RGB quantization. The encrypted stream has been tested on localhost and cross-compiled for the C9. Live bridge output, capture-side HDR encoding, an installer, measured capture cost, and opt-in boot and standby recovery are pending. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)
