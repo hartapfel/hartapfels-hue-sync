@@ -1,5 +1,6 @@
 """Send Hue v2 datagrams to an independent OpenSSL DTLS-PSK peer on localhost."""
 import ctypes as ct
+import math
 from pathlib import Path
 import secrets
 import socket
@@ -11,12 +12,16 @@ import time
 
 
 class Channel(ct.Structure):
-    _fields_ = [("id", ct.c_uint8), ("r", ct.c_uint16), ("g", ct.c_uint16), ("b", ct.c_uint16)]
+    _fields_ = [("id", ct.c_uint8), ("r", ct.c_double), ("g", ct.c_double), ("b", ct.c_double)]
 
 
 def main():
     lib = ct.CDLL(str(Path(sys.argv[1]).resolve()))
     openssl = sys.argv[2] if len(sys.argv) > 2 else "openssl"
+    oracle = None
+    if len(sys.argv) > 3:
+        from desktop_serializer import DesktopSerializer
+        oracle = DesktopSerializer(sys.argv[3])
     lib.hue_stream_open.argtypes = [ct.POINTER(ct.c_void_p), ct.c_char_p, ct.c_uint16,
                                     ct.c_char_p, ct.c_char_p, ct.c_char_p]
     lib.hue_stream_write.argtypes = [ct.c_void_p, ct.POINTER(Channel), ct.c_size_t]
@@ -29,7 +34,7 @@ def main():
     key = secrets.token_bytes(16)
     identity = b"c9-loopback-test"
     stream = ct.c_void_p()
-    channels = (Channel * 2)(Channel(11, 0, 32768, 65535), Channel(4, 0x1234, 0x5678, 0x9abc))
+    channels = (Channel * 2)(Channel(11, 0, 0.5, 1), Channel(4, 0, 0, 0))
     server = subprocess.Popen([openssl, "s_server", "-4", "-dtls1_2", "-quiet", "-nocert", "-naccept", "1",
                                "-cipher", "PSK-AES128-GCM-SHA256", "-psk", key.hex(),
                                "-psk_identity", identity.decode(), "-accept", f"127.0.0.1:{port}"],
@@ -58,11 +63,19 @@ def main():
         assert lib.hue_stream_write(stream, channels, 2) < 0
         channels[1].id = 4
         for i in range(258):
-            channels[0].r = i
+            edge = min(i * 257, 65535) / 65535
+            channels[0].r = edge
+            channels[1].r = math.nextafter(edge, -math.inf)
+            channels[1].g = math.nextafter(edge, math.inf)
+            channels[1].b = i / 257 + (0.5 / 65535)
             assert lib.hue_stream_write(stream, channels, 2) == 0
             expected.extend(b"HueStream" + bytes((2, 0, i % 256, 0, 0, 0, 0)) + area)
             for c in channels:
-                expected.extend(struct.pack(">BHHH", c.id, c.r, c.g, c.b))
+                values = c.r, c.g, c.b
+                if oracle:
+                    expected.extend(oracle.channel(c.id, values))
+                else:
+                    expected.extend(struct.pack(">BHHH", c.id, *(int(min(1, max(0, v)) * 65535) for v in values)))
             time.sleep(.002)
         lib.hue_stream_close(stream)
         stream = None
@@ -81,6 +94,8 @@ def main():
         server.stdout.close()
         server.stderr.close()
     print("OpenSSL received 258 exact HueStream v2 frames over DTLS 1.2 PSK, including sequence wrap.")
+    if oracle:
+        print("All 516 channel records byte-matched the installed Hue Sync Desktop serializer.")
 
 
 if __name__ == "__main__":

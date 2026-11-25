@@ -91,13 +91,16 @@ int hue_stream_open(struct hue_stream **out, const char *host, uint16_t port,
     return 0;
 }
 
-static void pack_u16(uint8_t *dst, uint16_t value)
+static void pack_component(uint8_t *dst, double normalized)
 {
+    // The desktop serializer clamps in double precision and truncates toward zero.
+    uint16_t value = !(normalized > 0.) ? 0 :
+                     normalized >= 1. ? UINT16_MAX : (uint16_t)(normalized * 65535.);
     dst[0] = (uint8_t)(value >> 8);
     dst[1] = (uint8_t)value;
 }
 
-int hue_stream_write(struct hue_stream *s, const struct hue_channel_rgb16 *channels, size_t count)
+int hue_stream_write(struct hue_stream *s, const struct hue_channel_rgb *channels, size_t count)
 {
     if (!s || !s->connected || !channels || !count || count > 256)
         return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
@@ -107,14 +110,14 @@ int hue_stream_write(struct hue_stream *s, const struct hue_channel_rgb16 *chann
     packet[11] = s->sequence;
     memcpy(packet + 16, s->area, sizeof(s->area));
     for (size_t i = 0; i < count; ++i) {
-        const struct hue_channel_rgb16 *c = &channels[i];
+        const struct hue_channel_rgb *c = &channels[i];
         if (seen[c->id]) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
         seen[c->id] = 1;
         uint8_t *p = packet + 52 + 7 * i;
         p[0] = c->id;
-        pack_u16(p + 1, c->red);
-        pack_u16(p + 3, c->green);
-        pack_u16(p + 5, c->blue);
+        pack_component(p + 1, c->red);
+        pack_component(p + 3, c->green);
+        pack_component(p + 5, c->blue);
     }
     size_t length = 52 + 7 * count;
     int ret;

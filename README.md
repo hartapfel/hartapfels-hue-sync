@@ -37,7 +37,7 @@ The checker takes a capture width, height, frame rate, frame count, Y′CbCr mat
 
 ## Hue Entertainment stream
 
-The stream client sends RGB16 updates for the selected entertainment configuration over DTLS 1.2 using its paired application identity and client key. The caller activates the area before opening the stream and supplies each channel's bridge-assigned ID. The loopback test uses temporary credentials and an independent OpenSSL peer. It checks the decrypted payload of 258 frames, including channel order, component byte order and sequence wraparound.
+The stream client accepts normalized RGB colors and the bridge-assigned channel IDs. It clamps each component, scales by 65,535 in double precision and truncates it to a 16-bit code. The caller activates the entertainment configuration before opening the DTLS 1.2 stream. A local OpenSSL peer decrypted 258 frames. All 516 channel records byte-matched the RGB record path in the installed desktop executable, including inputs immediately above and below code boundaries. Sequence wrap and byte order were also checked.
 
 Unpack the official `mbedtls-3.6.7.tar.bz2` source archive in `build/`. Its SHA-256 is `a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6`. [Mbed TLS release](https://github.com/Mbed-TLS/mbedtls/releases/tag/mbedtls-3.6.7)
 
@@ -47,7 +47,7 @@ Run the following in a Visual Studio x64 developer shell. The test command uses 
 $tls = (Resolve-Path build/mbedtls-3.6.7).Path
 cmake -S . -B build/host-msvc -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" "-DMBEDTLS_SOURCE_DIR=$tls"
 cmake --build build/host-msvc --target c9_hue_stream
-python tests/stream_loopback.py build/host-msvc/c9_hue_stream.dll 'C:/Program Files/Git/usr/bin/openssl.exe'
+python tests/stream_loopback.py build/host-msvc/c9_hue_stream.dll 'C:/Program Files/Git/usr/bin/openssl.exe' 'C:/Program Files/Hue Sync/HueSync.exe'
 ```
 
 With Zig 0.13, Ninja, llvm-ar and llvm-ranlib on PATH, use the same sources to build for the TV. Set `$piccap` to the absolute path of the capture source checkout described above.
@@ -61,4 +61,4 @@ cmake --build build/arm --target c9_hue_stream c9-capture-check
 
 The service's bridge client identifies a bridge by its certificate and bridge ID, pairs via its link button, and reads the selected Entertainment area's channel IDs and three-dimensional positions. It checks the active application before requesting start or stop. Pairing and ownership transitions are covered by the local fixture, `node tests/bridge.js`, which also runs on Node 0.12.2. A read-only check on a BSB003 bridge imported all 12 channels of the selected area. Each position matched a single desktop preset cuboid. The certificate check also passed on Windows with the C9-generation Node runtime. The public roots come from the pair documented by OpenHue. [OpenHue bridge roots](https://github.com/openhue/openhue-go/blob/main/certs.go) · [LG service runtime versions](https://webostv.developer.lge.com/develop/guides/js-service-basics)
 
-End-to-end comparisons still need desktop area composition, black-bar handling and final RGB quantization. The encrypted stream has been tested on localhost and cross-compiled for the C9. Live pairing with a dedicated app identity, live bridge output, capture-side HDR encoding, an installer, measured capture cost, and opt-in boot and standby recovery are pending. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)
+End-to-end comparisons still need desktop area composition, black-bar handling and HDR capture behavior. The encrypted stream has been tested on localhost and cross-compiled for the C9. Live pairing with a dedicated app identity, live bridge output, an installer, measured capture cost, and opt-in boot and standby recovery are pending. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)
