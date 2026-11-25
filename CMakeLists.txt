@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.18)
+project(C9ScreenSync LANGUAGES C)
+add_library(c9_bitmap SHARED src/bitmap.c src/color.c)
+target_include_directories(c9_bitmap PUBLIC src)
+set_target_properties(c9_bitmap PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON C_STANDARD 11)
+if(NOT MSVC)
+  target_link_libraries(c9_bitmap PRIVATE m)
+endif()
