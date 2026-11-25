@@ -17,7 +17,7 @@ function deferred() {
 module.exports = function createSession(launch) {
     var current = null, lastError = null;
     launch = launch || function () {
-        return spawn(path.join(__dirname, 'c9-sync'), ['--live-controls'], { stdio: ['pipe', 'pipe', 'pipe'] });
+        return spawn(path.join(__dirname, 'c9-sync'), ['--service'], { stdio: ['pipe', 'ignore', 'pipe', 'pipe'] });
     };
 
     function status() {
@@ -96,12 +96,13 @@ module.exports = function createSession(launch) {
                 s.failure = new Error('Could not run the screen capture worker.');
                 // Node emits close after a spawn error and after stdio closes.
             });
-            s.child.on('close', function () {
+            s.child.on('close', function (exitCode) {
                 var error = s.failure;
                 if (s.state !== 'stopping' && !error) {
-                    var message = /handshake failed/.test(diagnostic) ? 'The Hue stream handshake failed.' :
-                        /DILE capture device access denied|Creating handle to \/dev\/mem failed/.test(diagnostic) ?
-                            'webOS denied this app access to the native capture device. Use PicCap stream on this TV.' :
+                    var deviceUnavailable = exitCode === 77 ||
+                        /DILE capture device access denied|Creating handle to \/dev\/mem failed/.test(diagnostic);
+                    var message = deviceUnavailable ? 'The native capture device is unavailable to this app. Select PicCap stream.' :
+                        /handshake failed/.test(diagnostic) ? 'The Hue stream handshake failed.' :
                         /DILE capture start failed|DILE capture initialization failed/.test(diagnostic) ?
                             'LG capture could not start. Pause PicCap capture and try Direct TV capture again.' :
                         /PicCap input/i.test(diagnostic) ? 'PicCap input unavailable. Set PicCap to TCP 127.0.0.1 port 19401 and start capture.' :
@@ -109,7 +110,8 @@ module.exports = function createSession(launch) {
                             'TV capture failed. Check the video input and whether PicCap is using capture.' :
                             'The screen capture worker exited.';
                     error = new Error(message);
-                    if (/No PicCap input|PicCap input disconnected|No video frame/.test(diagnostic)) {
+                    if (deviceUnavailable) error.code = 'CAPTURE_ACCESS_DENIED';
+                    else if (/No PicCap input|PicCap input disconnected|No video frame/.test(diagnostic)) {
                         error.code = 'VIDEO_NOT_READY';
                     }
                 }
@@ -118,8 +120,12 @@ module.exports = function createSession(launch) {
             s.child.stdin.on('error', function () {
                 terminate(s, new Error('Could not configure the screen capture worker.'));
             });
-            s.child.stdout.setEncoding('utf8');
-            s.child.stdout.on('data', function (chunk) {
+            var readyPipe = s.child.stdio[3];
+            readyPipe.on('error', function () {
+                terminate(s, Error('Could not read the capture worker startup status.'));
+            });
+            readyPipe.setEncoding('utf8');
+            readyPipe.on('data', function (chunk) {
                 if (s.state !== 'starting') return;
                 pending += chunk.replace(/\r/g, '');
                 if (pending.length > 64) return terminate(s, new Error('Invalid worker response.'));
@@ -147,7 +153,9 @@ module.exports = function createSession(launch) {
         return s.start.promise;
     }
 
-    return { start: start, status: status, setPlayback: function (brightness, intensity) {
+    return { start: start, status: status, clearError: function () {
+        if (!current) lastError = null;
+    }, setPlayback: function (brightness, intensity) {
         if (!current || current.state === 'stopping') return;
         current.controls = new Buffer([brightness, intensity]);
         if (current.canUpdate) current.child.stdin.write(current.controls);

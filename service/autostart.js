@@ -2,12 +2,24 @@
 var activity = 'luna://com.palm.activitymanager/';
 var power = 'luna://com.webos.service.tvpower/power/getPowerState';
 var name = 'C9 Screen Sync on power-on';
+function readBootId() {
+    return new Promise(function (resolve, reject) {
+        require('fs').readFile('/proc/sys/kernel/random/boot_id', 'utf8', function (err, raw) {
+            if (err) return reject(err);
+            var id = raw.trim();
+            if (!/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id))
+                return reject(Error('Could not identify this TV boot.'));
+            resolve(id);
+        });
+    });
+}
 
 // An opt-in persistent Activity launches this service on a cold boot. While
 // adopted, the TV power subscription also sees Quick Start standby and wake.
 // The activity never requests a power lock.
-module.exports = function autoStart(service, app, session, start) {
-    var owner, sub, active, skipInitial = false, changing = false;
+module.exports = function autoStart(service, app, session, start, readBoot) {
+    readBoot = readBoot || readBootId;
+    var owner, duplicateCallbacks = [], sub, active, skipInitial = false, changing = false;
     var retry, reconnect, pendingStart, generation = 0, lastError = null, suppressed = false;
     function cancelRetry() { ++generation; clearTimeout(retry); retry = null; }
     function call(uri, params) {
@@ -26,7 +38,7 @@ module.exports = function autoStart(service, app, session, start) {
             return session.whenEnded().then(function (end) {
                 // Source changes can interrupt PicCap or HDMI after the first
                 // successful send. The session settles after releasing the area.
-                if (end.errorCode === 'VIDEO_NOT_READY') {
+                if (end.errorCode === 'VIDEO_NOT_READY' && !ownerColdBootOnly()) {
                     var err = Error(end.error);
                     err.code = end.errorCode;
                     throw err;
@@ -98,38 +110,79 @@ module.exports = function autoStart(service, app, session, start) {
             skipInitial = false;
         });
     }
-    function release() {
+    function release(error) {
         unwatch();
         var previous = owner;
         owner = null; active = undefined;
-        if (previous) previous.respond({returnValue: true});
+        var reply = error ? {returnValue:false, errorText:error.message} : {returnValue:true};
+        if (previous) previous.respond(reply);
+        duplicateCallbacks.splice(0).forEach(function (message) { message.respond(reply); });
+    }
+    function ownerColdBootOnly() {
+        return owner && owner.payload.coldBootOnly === true;
+    }
+    function handleColdBoot(message, token) {
+        return readBoot().then(function (id) {
+            return app.claimColdBoot(message.payload.registration, id);
+        }).then(function (fresh) {
+            if (owner !== message || generation !== token) return;
+            lastError = null;
+            if (!fresh) return;
+            active = true;
+            suppressed = false;
+            onActive(token, 0);
+        }, function (err) {
+            if (owner !== message || generation !== token) return;
+            lastError = err.message;
+            // Keep the persistent activity adopted while storage is busy.
+            retry = setTimeout(function () { retry = null; handleColdBoot(message, token); }, 5000);
+        });
     }
     service.register('onPowerOn', function (message) {
         var allowed = ['com.palm.activitymanager', 'com.webos.service.activitymanager'];
-        if (allowed.indexOf(message.sender) < 0 || !message.payload.$activity) {
+        if (allowed.indexOf(String(message.sender || '').split(' ')[0]) < 0 || !message.payload.$activity) {
             return message.respond({returnValue: false, errorText: 'Startup requires a TV activity.'});
         }
         app.acceptsBoot(message.payload.registration).then(function (accepted) {
             if (!accepted) return message.respond({returnValue: true});
+            // Responding completes the associated webOS activity. Hold duplicate
+            // deliveries alongside the original until we release that activity.
+            if (owner && owner.payload.registration === message.payload.registration &&
+                    owner.payload.$activity.activityId === message.payload.$activity.activityId) {
+                duplicateCallbacks.push(message);
+                return;
+            }
             release();
             // The webOS service framework adopts this message's activity before
             // delivery and completes it on respond. Hold it across standby.
             owner = message;
+            if (ownerColdBootOnly()) return handleColdBoot(message, generation);
             watch();
         }).catch(function (err) {
-            message.respond({returnValue: false, errorText: err.message});
+            if (owner === message) {
+                lastError = err.message;
+                release(err);
+            } else {
+                message.respond({returnValue: false, errorText: err.message});
+            }
         });
     });
     function enable() {
         var registration = require('crypto').randomBytes(16).toString('hex');
+        var params = {registration:registration};
         return call(power, {}).then(function (p) {
             if (!p.state) throw Error('TV power state is unavailable.');
-            return app.setAutoStart(true, registration);
+        }, function (err) {
+            if (!/denied|permission|not permitted/i.test(err.message)) throw err;
+            params.coldBootOnly = true;
+            return readBoot();
+        }).then(function (id) {
+            return app.setAutoStart(true, registration, id);
         }).then(function () {
-            skipInitial = true;
+            skipInitial = !params.coldBootOnly;
             return call(activity + 'create', { activity: {name: name, description: 'Start screen sync on TV power-on',
                 type: {immediate: true, priority: 'low', persist: true, explicit: true, power: false},
-                callback: {method: 'luna://org.webosbrew.c9screensync.service/onPowerOn', params: {registration: registration}}},
+                callback: {method: 'luna://org.webosbrew.c9screensync.service/onPowerOn', params: params}},
                 start: true, replace: true, subscribe: false }).catch(function (err) {
                 skipInitial = false;
                 return app.setAutoStart(false).then(function () { throw err; });

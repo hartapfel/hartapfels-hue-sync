@@ -4,10 +4,10 @@
 // Settings writes serialize with starts; stop always reaches a pending start.
 var fs = require('fs');
 function captureAccess() {
-    if (process.platform !== 'linux') return Promise.resolve(null);
+    if (process.platform !== 'linux' && process.platform !== 'webos') return Promise.resolve(null);
     return new Promise(function (resolve) {
         fs.access('/dev/mem', fs.R_OK | fs.W_OK, function (err) {
-            resolve(!err ? true : err.code === 'EACCES' || err.code === 'EPERM' ? false : null);
+            resolve(!err ? true : ['EACCES','EPERM','ENOENT','ENOTDIR'].indexOf(err.code) >= 0 ? false : null);
         });
     });
 }
@@ -26,6 +26,7 @@ module.exports = function controller(hue, store, session, checkAccess) {
         var state = session.status();
         return { state: state.state, error: state.error, bridge: settings.bridge || null,
             paired: Boolean(settings.keys), area: settings.area || null, autoStart: settings.autoStart === true,
+            coldBootOnly: !!settings.lastColdBoot,
             source: settings.source, directAccess: directAccess, brightness: settings.brightness, intensity: settings.intensity };
     }
     function commit(changes) {
@@ -74,17 +75,25 @@ module.exports = function controller(hue, store, session, checkAccess) {
                     registration === settings.bootRegistration;
             });
         },
-        setAutoStart: function (enabled, registration) {
+        claimColdBoot: function (registration, id) {
+            return edit(function () {
+                if (!settings.autoStart || registration !== settings.bootRegistration ||
+                        !settings.lastColdBoot || settings.lastColdBoot === id) return false;
+                return commit({lastColdBoot:id}).then(function () { return true; });
+            }, true);
+        },
+        setAutoStart: function (enabled, registration, bootId) {
             return edit(function () {
                 if (typeof enabled !== 'boolean') throw Error('Choose a startup setting.');
                 if (enabled && !settings.area) throw Error('Select an entertainment area first.');
-                return commit({autoStart: enabled, bootRegistration: enabled ? registration : undefined});
+                return commit({autoStart: enabled, bootRegistration: enabled ? registration : undefined,
+                    lastColdBoot: enabled ? bootId : undefined});
             }, true);
         },
         setSource: function (source) {
             return edit(function () {
                 if (source !== 'direct' && source !== 'piccap') throw Error('Unknown video input.');
-                return commit({ source: source });
+                return commit({ source: source }).then(function () { session.clearError(); return status(); });
             });
         },
         setPlayback: function (brightness, intensity) {

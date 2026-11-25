@@ -25,6 +25,7 @@ var hue = {
 };
 var updates = [], launches = [];
 var session = {
+    clearError: function () {},
     setPlayback: function (brightness, intensity) { updates.push([brightness, intensity]); },
     status: function () { return { state:state, error:null }; },
     start: function (connection, bridge, keys, id, capture) {
@@ -59,6 +60,15 @@ setImmediate(function () {
         .then(function () { return controller(hue, store, session).status(); })
         .then(function (s) { assert.equal(s.source, 'piccap'); return app.setSource('direct'); })
         .then(function () { return rejects(app.setSource('invalid'), /Unknown/); })
+        .then(function () { return app.setAutoStart(true, 'registered', 'boot-a'); })
+        .then(function (s) { assert(s.coldBootOnly); return app.claimColdBoot('stale', 'boot-b'); })
+        .then(function (fresh) { assert.strictEqual(fresh, false); return app.claimColdBoot('registered', 'boot-a'); })
+        .then(function (fresh) { assert.strictEqual(fresh, false); return app.claimColdBoot('registered', 'boot-b'); })
+        .then(function (fresh) {
+            assert.strictEqual(fresh, true);
+            return controller(hue, store, session).claimColdBoot('registered', 'boot-b');
+        }).then(function (fresh) { assert.strictEqual(fresh, false); return app.setAutoStart(false); })
+        .then(function (s) { assert(!s.coldBootOnly); assert(!s.autoStart); })
         .then(function () {
             var denied = controller(hue, store, session, function () { return Promise.resolve(false); });
             return denied.status().then(function (s) {

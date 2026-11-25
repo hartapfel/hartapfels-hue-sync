@@ -19,6 +19,8 @@ test_package() {
     grep -q '/sdk/libc.so.6' sdk.list && grep -q '/app/libc9_hue_stream.so' sdk.list || return 1
     /app/c9-sync </dev/null 2>invalid.err
     [ "$?" = 2 ] && grep -q 'Invalid screen sync session' invalid.err || return 1
+    su -s /bin/sh nobody -c 'exec /app/c9-sync --service' <direct-session >firmware.out 2>access.err 3>ready.out
+    [ "$?" = 77 ] && [ ! -s ready.out ] && grep -q 'Native capture device unavailable' access.err || return 1
     # The guest has no LG display libraries. The failure must name a firmware
     # dependency, proving the installed worker found its own real DILE backend.
     /app/c9-sync --measure-hdr-chart direct >missing.out 2>missing.err
@@ -72,9 +74,11 @@ test_stream() {
     if [ "$1" = chart ]; then descriptor=chart-descriptor; fi
     mkfifo peer.in worker.in
     exec 4<>worker.in
-    mode=--wait-for-bridge
-    if [ "$1" = controls ]; then mode=--live-controls; fi
-    /app/c9-sync "$mode" <worker.in >session.out 2>session.err &
+    if [ "$1" = controls ]; then
+        /app/c9-sync --service <worker.in >firmware.out 2>session.err 3>session.out &
+    else
+        /app/c9-sync --wait-for-bridge <worker.in >session.out 2>session.err &
+    fi
     child=$!
     if [ "$1" = controls ]; then printf '\144\001' >&4; fi
     cat "$descriptor" >&4

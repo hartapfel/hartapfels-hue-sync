@@ -2,6 +2,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cerrno>
 #include <cmath>
 #include <condition_variable>
 #include <cstdio>
@@ -45,6 +46,7 @@ struct Session {
     uint32_t mask[256]{}, used{};
     uint8_t brightness = 100, intensity = 1;
     bool live_controls = false;
+    FILE *status_output = stdout;
 };
 
 struct Preset { float lightness, chroma; unsigned threshold; };
@@ -155,8 +157,8 @@ bool await_bridge(Video& video) {
         if (video.done || cancelled(nullptr)) return false;
     }
     // No capture frame or mutex is held while the service activates the area.
-    std::puts("video-ready");
-    std::fflush(stdout);
+    if (std::fputs("video-ready\n", video.session.status_output) < 0 ||
+        std::fflush(video.session.status_output) != 0) return false;
     if (std::fgetc(stdin) != 1 || cancelled(nullptr)) return false;
     std::lock_guard<std::mutex> lock(video.mutex);
     if (video.done || Clock::now() - video.last_capture >= std::chrono::seconds(5)) {
@@ -232,8 +234,8 @@ int stream_video(Video& video, hue_stream *stream) {
                 return 1;
             }
             if (!ready) {
-                std::puts("streaming");
-                std::fflush(stdout);
+                if (std::fputs("streaming\n", video.session.status_output) < 0 ||
+                    std::fflush(video.session.status_output) != 0) return 1;
                 ready = true;
             }
             next_send += send;
@@ -265,6 +267,15 @@ int main(int argc, char **argv) {
     bool wait_for_bridge = argc == 2 && std::strcmp(argv[1], "--wait-for-bridge") == 0;
     Session session;
     session.live_controls = argc == 2 && std::strcmp(argv[1], "--live-controls") == 0;
+#ifdef __linux__
+    if (argc == 2 && std::strcmp(argv[1], "--service") == 0) {
+        // Descriptor 3 is reserved for the two startup messages. Firmware
+        // libraries can print to stdout even before capture_init returns.
+        session.status_output = fdopen(3, "w");
+        if (!session.status_output) return 2;
+        session.live_controls = true;
+    }
+#endif
     if (argc != 1 && !wait_for_bridge && !session.live_controls) return 2;
     if (session.live_controls) {
         // Control updates share stdin with the initial descriptor and grant.
@@ -277,6 +288,14 @@ int main(int argc, char **argv) {
         std::fputs("Invalid screen sync session descriptor\n", stderr);
         return 2;
     }
+#ifdef __linux__
+    // Check from the worker's own context before initializing LG capture.
+    if (!session.piccap && session.status_output != stdout && access("/dev/mem", R_OK | W_OK) != 0 &&
+        (errno == EACCES || errno == EPERM || errno == ENOENT || errno == ENOTDIR)) {
+        std::fputs("Native capture device unavailable to this worker\n", stderr);
+        return 77; // EX_NOPERM; the service can explain this even if a library fills stderr.
+    }
+#endif
     Video video(session);
     std::thread capture([&] {
         auto capture_source = session.piccap ? c9_receive_piccap : c9_capture_video;

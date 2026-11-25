@@ -22,12 +22,13 @@ function fixture(startArea, behavior, layout) {
         child.stdin = new PassThrough();
         child.stdout = new PassThrough();
         child.stderr = new PassThrough();
+        child.stdio = [child.stdin, child.stdout, child.stderr, new PassThrough()];
         child.stdin.on('data', function (buf) {
             if (buf.length === 3) {
                 assert.equal(buf[0], 1);
                 f.controls.push([buf[1], buf[2]]);
                 ++f.grants;
-                child.stdout.write('stream'); child.stdout.write('ing\n');
+                child.stdio[3].write('stream'); child.stdio[3].write('ing\n');
             } else if (buf.length === 2) f.controls.push([buf[0], buf[1]]);
             else assert.equal(buf.toString('ascii', 0, 4), 'C9S2');
         });
@@ -47,7 +48,10 @@ function fixture(startArea, behavior, layout) {
     return f;
 }
 function available() { return Promise.resolve(area); }
-function ready(child) { child.stdout.write('video-'); child.stdout.write('ready\n'); }
+function ready(child) {
+    child.stdout.write(new Array(1024).join('driver output') + '\nstreaming\nvideo-ready\n');
+    child.stdio[3].write('video-'); child.stdio[3].write('ready\n');
+}
 
 function tests() {
     var first = fixture(available, ready);
@@ -79,6 +83,17 @@ function tests() {
                 assert.equal(failed.activated, 0);
                 assert.equal(failed.released, 0);
                 assert.equal(failed.session.status().state, 'idle');
+            });
+        }).then(function () {
+            var denied = fixture(available, function (child) {
+                child.stdout.write('video-ready\n' + new Array(100).join('driver log') + '\n');
+                child.emit('close', 77);
+            });
+            return rejected(denied.start(), /native capture device/).then(function () {
+                assert.equal(denied.activated, 0);
+                assert.equal(denied.session.status().errorCode, 'CAPTURE_ACCESS_DENIED');
+                denied.session.clearError();
+                assert.strictEqual(denied.session.status().error, null);
             });
         }).then(function () {
             var runningChild;

@@ -4,11 +4,14 @@ var Events = require('events').EventEmitter;
 var create = require('../service/autostart');
 var config = {}, registration, sub, callback, activity, responds = 0;
 var starts = 0, stops = 0, canCreate = true, live = false;
+var powerDenied = false, bootId = 'first', storedBoot;
 function later(fn) { return new Promise(function (resolve) { setImmediate(function () { if (fn) fn(); resolve(); }); }); }
 var service = {
     register: function (name, fn) { assert.equal(name, 'onPowerOn'); callback = fn; },
     call: function (uri, params, reply) {
-        if (/getPowerState$/.test(uri)) return reply({payload: {returnValue: true, state: 'Active'}});
+        if (/getPowerState$/.test(uri)) return reply({payload: powerDenied ?
+            {returnValue:false, errorText:'Denied method call "getPowerState" for category "/power"'} :
+            {returnValue:true, state:'Active'}});
         if (/create$/.test(uri)) {
             if (!canCreate) return reply({payload: {returnValue: false, errorText: 'Activity unavailable'}});
             activity = params;
@@ -27,7 +30,14 @@ var service = {
 var app = {
     status: function () { return Promise.resolve({autoStart: config.enabled, area: 'TV', state: live ? 'streaming' : 'idle'}); },
     acceptsBoot: function (id) { return Promise.resolve(config.enabled && registration === id); },
-    setAutoStart: function (enabled, id) { config.enabled = enabled; registration = id; return app.status(); }
+    setAutoStart: function (enabled, id, currentBoot) {
+        config.enabled = enabled; registration = id; storedBoot = currentBoot; return app.status();
+    },
+    claimColdBoot: function (id, currentBoot) {
+        var fresh = config.enabled && registration === id && storedBoot !== currentBoot;
+        if (fresh) storedBoot = currentBoot;
+        return Promise.resolve(fresh);
+    }
 };
 var ended, end;
 function streaming() {
@@ -45,15 +55,55 @@ var session = {
     whenEnded: function () { return ended || app.status(); },
     stop: function () { ++stops; return finish(); }
 };
-function init(start) { return create(service, app, session, start || function () { ++starts; return streaming(); }); }
-function fire(id) {
-    callback({sender: 'com.webos.service.activitymanager', payload: {$activity: {activityId: 10}, registration: id},
+function init(start) { return create(service, app, session, start || function () { ++starts; return streaming(); },
+    function () { return Promise.resolve(bootId); }); }
+function fire(id, coldOnly) {
+    callback({sender: 'com.webos.service.activitymanager 42', payload: {$activity: {activityId: 10}, registration: id, coldBootOnly:coldOnly},
         respond: function () { ++responds; }});
     return later();
 }
 function power(value, onOff, processing) {
     sub.emit('response', {payload: {returnValue: true, state: value, onOff: onOff, processing: processing}});
     return later();
+}
+function coldBootWithoutPowerSubscription() {
+    var boot = init(), baseline = starts;
+    powerDenied = true; canCreate = true; sub = null;
+    return boot.set(true).then(function () {
+        assert.strictEqual(activity.activity.callback.params.coldBootOnly, true);
+        assert.strictEqual(storedBoot, bootId);
+        return fire(registration, true);
+    }).then(function () {
+        assert.equal(starts, baseline); assert(!sub);
+        bootId = 'second';
+        boot = init();
+        var before = responds;
+        return Promise.all([fire(registration, true), fire(registration, true)]).then(function () {
+            assert.equal(responds, before); // neither delivery may complete the shared activity
+        });
+    }).then(function () {
+        assert(live); assert.equal(starts, baseline + 1); assert(!sub);
+        return finish({state:'idle', errorCode:'VIDEO_NOT_READY', error:'Disconnected'});
+    }).then(function () {
+        assert(!boot.waiting()); boot = init(); return fire(registration, true);
+    }).then(function () {
+        assert.equal(starts, baseline + 1); assert(!live); return boot.set(false);
+    }).then(function () {
+        bootId = 'third'; return fire('removed-registration', true);
+    }).then(function () { assert.equal(starts, baseline + 1); });
+}
+
+function cancelDuringBootClaim() {
+    var original = app.claimColdBoot, resolveClaim, boot = init(), count = starts;
+    config.enabled = true; registration = 'slow-claim';
+    app.claimColdBoot = function () {
+        return new Promise(function (resolve) { resolveClaim = resolve; });
+    };
+    return fire(registration, true).then(function () {
+        assert(resolveClaim); boot.manualStop(); resolveClaim(true); return later();
+    }).then(function () {
+        assert.equal(starts, count); assert(!boot.waiting()); return boot.set(false);
+    }).then(function () { app.claimColdBoot = original; });
 }
 
 function lateWake() {
@@ -147,6 +197,8 @@ setImmediate(function () {
             return boot.set(true).then(function () { throw Error('Expected creation failure'); }, function (err) {
                 assert(/unavailable/.test(err.message)); assert.equal(config.enabled, false);
             });
-        }).then(lateWake).then(function () { console.log('Boot opt-in, delayed HDMI and bridge, power reconnect, standby and cancellation passed on ' + process.version); })
+        }).then(lateWake).then(coldBootWithoutPowerSubscription).then(cancelDuringBootClaim).then(function () {
+            console.log('Boot opt-in, delayed input, standby, cancellation and cold boot without power access passed on ' + process.version);
+        })
         .catch(function (err) { console.error(err.stack); process.exitCode = 1; });
 });

@@ -105,6 +105,10 @@ def add_fixture(vm, temp, args):
               {"width": 96, "height": 64, "fps": 30, "matrix": 1, "range": 0, "source": "piccap"}, 2100]
     script = "process.stdout.write(require('./worker-session').apply(null, JSON.parse(process.argv[1])))"
     vm.add("fixture/descriptor", subprocess.check_output(["node", "-e", script, json.dumps(config)], cwd=temp))
+    direct = list(config)
+    direct[3] = dict(config[3], source="direct", width=320, height=180)
+    vm.add("fixture/direct-session", bytes((100, 1)) +
+           subprocess.check_output(["node", "-e", script, json.dumps(direct)], cwd=temp))
     if args.chart_reference:
         config[2]["channels"] = json.loads(args.chart_reference.read_text())["channels"]
         assert len(config[2]["channels"]) == 14

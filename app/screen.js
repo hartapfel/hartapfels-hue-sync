@@ -87,7 +87,8 @@
         el('reload').disabled = pending || !idle || !s.paired;
         el('boot').disabled = pending || (!s.autoStart && !s.area);
         el('boot').setAttribute('aria-pressed', String(!!s.autoStart));
-        el('boot').textContent = 'Start sync on power-on · ' + (s.autoStart ? 'On' : 'Off');
+        el('boot').textContent = (s.coldBootOnly ? 'Start sync on cold boot' : 'Start sync on power-on') +
+            ' · ' + (s.autoStart ? 'On' : 'Off');
         ['piccap', 'direct'].forEach(function (source) {
             el(source).disabled = pending || !idle;
             el(source).setAttribute('aria-pressed', String(s.source === source));

@@ -22,7 +22,7 @@ PalmServiceBridge.prototype.call = function (uri, raw) {
     else if (method === 'select') { if (p.id !== area.id) throw Error('Wrong area'); state.area = area; }
     else if (method === 'start') state.state = 'streaming';
     else if (method === 'stop') { state.state = 'idle'; state.wakeRetry = false; }
-    else if (method === 'setAutoStart') state.autoStart = p.enabled;
+    else if (method === 'setAutoStart') { state.autoStart = p.enabled; state.coldBootOnly = p.enabled; }
     else if (method === 'setSource') state.source = p.source;
     else if (method === 'setPlayback') { state.brightness = p.brightness; state.intensity = p.intensity; }
     else if (method !== 'status') throw Error('Unexpected call ' + method);
@@ -77,6 +77,7 @@ var steps = [
     },
     function () {
         check(byId('boot').getAttribute('aria-pressed') === 'true', 'Boot toggle');
+        check(byId('boot').textContent === 'Start sync on cold boot · On', 'Cold-boot-only label');
         byId('sync').click();
     },
     function () {
