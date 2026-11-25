@@ -18,7 +18,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Acquire pinned toolchain and reference
+      - name: Extract verified desktop reference
+        shell: pwsh
+        timeout-minutes: 6
+        run: ./ci/reference.ps1
+      - name: Acquire pinned toolchain and packaging dependencies
         shell: pwsh
         run: ./ci/prepare.ps1
       - name: Compile ARM workers and package
