@@ -1,6 +1,7 @@
 /* Capture fixture loaded only in the ARM test guest. Use the same capture ABI
    as the release module and fail if the worker misorders frame ownership. */
 #include <stdio.h>
+#include <time.h>
 #include "unicapture.h"
 #include "quirks.h"
 #include "color.h"
@@ -9,6 +10,7 @@ enum { WIDTH = 96, HEIGHT = 64, STRIDE = 102 };
 static unsigned char planes[2][HEIGHT * STRIDE];
 static enum { INITIALIZED, STARTED, WAITED, ACQUIRED, STOPPED } phase;
 static unsigned releases;
+static struct timespec first_acquire;
 
 /* In the numerical regression run these functions resolve to the exported
    symbols in the packaged worker. Preserve filter history until the reference
@@ -77,6 +79,16 @@ int capture_wait(void *state)
 int capture_acquire_frame(void *state, frame_info_t *frame)
 {
     if (state != &phase || phase != WAITED) return -1;
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return -1;
+    if (!releases) first_acquire = now;
+    if (releases == 7) {
+        double elapsed = (now.tv_sec - first_acquire.tv_sec) +
+                         (now.tv_nsec - first_acquire.tv_nsec) * 1e-9;
+        // This backend returns from wait immediately. Seven intervals at 30 Hz
+        // must span about 233 ms even if the driver ignores its rate setting.
+        if (elapsed < .230) return -1;
+    }
     frame->width = WIDTH;
     frame->height = HEIGHT;
     frame->pixel_format = PIXFMT_YUV422_SEMI_PLANAR;

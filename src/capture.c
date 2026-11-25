@@ -105,10 +105,25 @@ int c9_capture_video(const struct capture_settings *settings, capture_callback c
         goto cleanup;
     }
     status = 0;
+    const uint64_t interval_us = (1000000u + settings->fps - 1) / settings->fps;
+    uint64_t next_sample_us = 0;
     while (!cancelled(context)) {
         frame_info_t source = {0};
         if (api.wait(api.state) != 0) { status = -1; break; }
+        // C9 firmware can signal every display refresh despite the DILE divider.
+        // Wait before borrowing the current frame so capture never holds a
+        // frozen buffer during this delay. A slower input needs no extra wait.
+        uint64_t now = getticks_us();
+        while (now < next_sample_us && !cancelled(context)) {
+            uint64_t remaining = next_sample_us - now;
+            struct timespec delay = {(time_t)(remaining / 1000000u),
+                                     (long)(remaining % 1000000u) * 1000};
+            if (nanosleep(&delay, NULL) != 0 && errno != EINTR) { status = -1; break; }
+            now = getticks_us();
+        }
+        if (status != 0) break;
         if (cancelled(context)) break;
+        next_sample_us = now + interval_us;
         if (api.acquire_frame(api.state, &source) != 0) { status = -1; break; }
         struct capture_bitmap frame = {0};
         int next = borrow_bitmap(&source, settings, &frame) ? consume(&frame, context) : -1;
