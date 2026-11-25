@@ -30,4 +30,4 @@ def write_reference(exe, config, output, ticks, effect):
         for records, color in zip((first, settled), ticks(target)):
             effect.set_color(color)
             records.extend(effect.channel(identifier, effect.mix([effect.render(position)])))
-    output.write_text(json.dumps(dict(channels=channels, first=first.hex(), settled=settled.hex())), encoding="utf-8")
+    output.write_text(json.dumps(dict(brightnessPercent=100, channels=channels, first=first.hex(), settled=settled.hex())), encoding="utf-8")

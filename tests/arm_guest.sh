@@ -74,13 +74,13 @@ test_stream() {
     if [ "$1" = chart ]; then descriptor=chart-descriptor; fi
     mkfifo peer.in worker.in
     exec 4<>worker.in
-    if [ "$1" = controls ]; then
+    if [ "$1" = controls ] || [ "$1" = chart ]; then
         /app/c9-sync --service <worker.in >firmware.out 2>session.err 3>session.out &
     else
         /app/c9-sync --wait-for-bridge <worker.in >session.out 2>session.err &
     fi
     child=$!
-    if [ "$1" = controls ]; then printf '\144\001' >&4; fi
+    if [ "$1" = controls ] || [ "$1" = chart ]; then printf '\144\001' >&4; fi
     cat "$descriptor" >&4
     wait_port && [ ! -s session.out ] || return 1
     feed_frames "$1" | nc -w 2 127.0.0.1 19401 >acks &

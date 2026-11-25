@@ -44,7 +44,7 @@ struct Session {
     uint8_t key[16]{}, ids[256]{};
     uint16_t port{}, count{};
     uint32_t mask[256]{}, used{};
-    uint8_t brightness = 100, intensity = 1;
+    uint8_t brightness = 50, intensity = 1; // Unit gain for legacy callers without slider controls.
     bool live_controls = false;
     FILE *status_output = stdout;
 };
@@ -212,13 +212,14 @@ int stream_video(Video& video, hue_stream *stream) {
                 video.intensity.store(intensity);
             }
             const auto& preset = presets[intensity];
+            float gain = c9_streaming_brightness_gain(brightness);
             auto alpha = c9_video_smoothing(fps, preset.lightness, preset.chroma);
 #ifdef C9_WORKER_TEST
             fixture_tick(now);
 #endif
             for (unsigned i = 0; i < targets.size(); ++i) {
                 if (!(video.session.used & (1u << i))) continue;
-                c9_rgb rgb = c9_video_moderate_apply(targets[i], &history[i], brightness / 100.f, alpha, 1);
+                c9_rgb rgb = c9_video_moderate_apply(targets[i], &history[i], gain, alpha, 1);
                 if (!brightness) rgb = {};
                 layers[i] = {rgb.r, rgb.g, rgb.b, 1.};
             }

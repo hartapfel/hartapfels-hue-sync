@@ -132,7 +132,7 @@ The fixture uses these files in `build/arm-vm`:
 ```powershell
 cmake --build build/arm --target c9-test-capture-backend
 python tests/desktop_color.py 'C:/Program Files/Hue Sync/HueSync.exe' build/host-msvc/c9_bitmap.dll --arm-vectors build/arm-vm/desktop-ticks.bin --chart-reference "$env:APPDATA/HueSync/config.json" build/arm-vm/desktop-chart.json
-python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.5.0_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb --desktop-vectors build/arm-vm/desktop-ticks.bin --chart-reference build/arm-vm/desktop-chart.json
+python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.5.2_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb --desktop-vectors build/arm-vm/desktop-ticks.bin --chart-reference build/arm-vm/desktop-chart.json
 ```
 
 The optional desktop vectors exercise 528 Video/Moderate ticks inside the worker extracted from the IPK. Each run carries its own history through multiple colors, including black, mixed tones and highlights. On the two ARM runtimes the maximum absolute channel error against the desktop was 0.00000011921 on a 0–1 scale.
@@ -145,7 +145,9 @@ The service's bridge client identifies a bridge by its certificate and bridge ID
 
 The C9 Screen Sync app has its own webOS package ID, private pairing storage and background service. Enter the bridge IP, press the bridge link button, pair, then choose an existing Entertainment area. Release HyperHDR's Hue stream before choosing Start sync. Closing the setup screen leaves the session running. Reopen the app to stop it.
 
-**Brightness** adjusts all lights together from 0 to 100%. The slider sets gain before the desktop color filter. Zero mutes the lights while capture continues. **Video intensity** selects Hue Desktop's Subtle, Moderate, High or Intense preset. Each preset supplies separate lightness and color response rates and a threshold for accepting frame changes. Both controls work during sync, persist across sessions and default to 100% and Moderate. With the remote, use Up and Down to move between controls and Left and Right to adjust a focused slider. The Magic Remote wheel scrolls the setup screen.
+**Brightness** adjusts all lights together from 0 to 100%. Version 0.5.2 follows the streaming slider in Hue Sync Desktop 1.13.1.83. Its gain is 1× at 50%, 2.5× at 75%, and 4× at 100%. The video filter applies the gain to each region and limits its strongest RGB channel to full scale. Zero mutes the lights while capture continues. Saved percentages carry forward on upgrade. Set 50% for the brightness that 0.5.1 produced at 100%.
+
+**Video intensity** selects Hue Desktop's Subtle, Moderate, High or Intense preset. Each preset supplies separate lightness and color response rates and a threshold for accepting frame changes. Both controls work during sync, persist across sessions and default to 100% and Moderate. With the remote, use Up and Down to move between controls and Left and Right to adjust a focused slider. The Magic Remote wheel scrolls the setup screen.
 
 **Direct TV capture** requests the C9 DILE `CreateEx` mode at 320 × 180 and 30 fps. The driver opens `/dev/mem` for reading and writing. On the tested C9 this device is owned by root and group 505 with mode 0660. The running app service and worker had UID 6980, primary group 5000, supplementary groups 44 and 777, and no effective capabilities. This installation needs PicCap for capture. The app checks access as the service account, explains a denial before starting and chooses PicCap for a new setup on an affected TV. Existing installations keep their saved input. If another installation has device access, pause competing capture before trying Direct TV capture.
 
@@ -161,7 +163,7 @@ python package.py --ares-js /path/to/ares-cli/bin/ares-package.js
 
 The packaging script checks the app and service manifests, ARM payloads, executable mode and release metadata before saving the IPK in `build/ipk`. Its inputs include Mbed TLS and the Zig runtime licenses. The TV setup screen and service use LG's JS service packaging model. [LG JS service guide](https://webostv.developer.lge.com/develop/guides/js-service-usage)
 
-The owner verified the lights reacting to PicCap input on a physical C9 running 0.4.2. During a live session PicCap reported 30 fps. Over a 5.02-second sample the Screen Sync worker used 15 ticks at 100 ticks per second (about 3% of one CPU core) and 1,304 KiB of resident memory. These figures cover the worker alone. Dev Manager subsequently confirmed the installation of 0.5.0.
+The owner verified the lights reacting to PicCap input on a physical C9 running 0.4.2. During a live session PicCap reported 30 fps. Over a 5.02-second sample the Screen Sync worker used 15 ticks at 100 ticks per second (about 3% of one CPU core) and 1,304 KiB of resident memory. These figures cover the worker alone. Dev Manager subsequently confirmed installation of 0.5.0 and 0.5.1.
 
 **Start sync on power-on** is off by default. Enabling it registers a persistent webOS activity. On TVs that grant the power-state subscription, the service handles both cold boot and Quick Start wake. Standby cancels retries and releases the current session. On firmware that denies the power-state query, 0.5.1 displays **Start sync on cold boot**. It records the current kernel boot ID and starts when Activity Manager first delivers the callback after a new boot. Enabling the preference or reopening the app during the same boot leaves the lights under manual control. [LG Activity Manager](https://webostv.developer.lge.com/develop/references/activity-manager)
 

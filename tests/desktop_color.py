@@ -4,6 +4,7 @@ import ctypes as ct
 from itertools import product
 from pathlib import Path
 import random
+import re
 import struct
 
 from unicorn import UC_HOOK_CODE, UC_PROT_EXEC, UC_PROT_READ
@@ -32,6 +33,19 @@ def scalar(vm, reg):
     return struct.unpack("<f", struct.pack("<I", vm.reg_read(reg) & 0xffffffff))[0]
 
 
+def streaming_gains(desktop):
+    """Read the two numeric slider branches from the installed desktop UI."""
+    number = rb"([0-9.]+)"
+    assign = rb"hueao\.selectedArea\.streamingBrightness\s*=\s*"
+    branches = (rb"if\s*\(value < " + number + rb"\)\s*\{\s*" + assign +
+                rb"value / " + number + rb";\s*\}\s*else\s*\{\s*" + assign +
+                rb"\(\(\(value - " + number + rb"\) / " + number + rb"\) \* " + number + rb"\) \+ " + number + rb";")
+    match, = re.finditer(branches, desktop)
+    pivot, lower_span, upper_start, upper_span, scale, base = map(float, match.groups())
+    return [p/lower_span if p < pivot else (p-upper_start)/upper_span*scale+base
+            for p in (i/100 for i in range(101))]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("desktop", type=Path)
@@ -43,6 +57,12 @@ def main():
     vm = DesktopBitmap(args.desktop).vm
     data = args.desktop.read_bytes()
     lib = ct.CDLL(str(args.library.resolve()))
+    gains = streaming_gains(data)
+    lib.c9_streaming_brightness_gain.argtypes = [ct.c_uint]
+    lib.c9_streaming_brightness_gain.restype = ct.c_float
+    for percent, gain in enumerate(gains):
+        assert lib.c9_streaming_brightness_gain(percent) == ct.c_float(gain).value, percent
+    print(f"All 101 streaming brightness positions matched the desktop slider; max gain {gains[100]:g}.")
     lib.c9_rgb_to_lab.argtypes = [Triple, ct.c_int]
     lib.c9_lab_to_rgb.argtypes = [Triple]
     lib.c9_filter_lab.argtypes = [Triple, Triple, ct.c_float, ct.c_float]
@@ -170,6 +190,7 @@ def main():
     print("The ARM package fixture's first two channel records matched the desktop renderer and serializer.")
     if args.chart_reference:
         from desktop_chart import write_reference
+        vm.mem_write(config + 0xe8, struct.pack("<f", gains[100]))
         def chart_ticks(target):
             vm.mem_write(frame + 0x50, bytes(Triple()))
             first = desktop_tick(target, 60.)
@@ -213,7 +234,7 @@ def main():
     checked = 0
     for lightness, chroma in ((.005,.15), (.025,.30), (.07,.5), (.5,.5)):
         vm.mem_write(preset + 0x44, struct.pack("<ff", chroma, lightness))
-        for gain in (.05, .5, 1.):
+        for gain in (gains[p] for p in (5, 50, 75, 100)):
             vm.mem_write(config + 0xe8, struct.pack("<f", gain))
             history = Triple()
             vm.mem_write(frame + 0x50, bytes(history))
@@ -224,7 +245,7 @@ def main():
                 rgb = lib.c9_video_moderate_apply(Triple(*point),ct.byref(history),gain,alpha,1)
                 assert max(abs(a-b) for a,b in zip(rgb.values(), queued)) <= 1e-5
                 checked += 1
-    print(f"{checked} ticks across all four Video intensity presets matched Hue Desktop at three gain levels.")
+    print(f"{checked} ticks across all four Video intensity presets matched Hue Desktop at four slider positions.")
     if args.arm_vectors:
         args.arm_vectors.write_bytes(vectors)
 

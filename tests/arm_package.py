@@ -170,7 +170,7 @@ def verify(log, expected):
     dark = [i for i, (a,r,g,b,z,rr,gg,bb) in enumerate(records) if max(r,g,b,rr,gg,bb) == 0]
     assert len(dark) >= 3 and dark == list(range(dark[0], dark[-1]+1)) and dark[0] > 0
     left,r,g,b,right,rr,gg,bb = records[-1]
-    assert (left,right) == (19,3) and min(r,bb) > 1000 and max(r,bb) < 64000
+    assert (left,right) == (19,3) and min(r,bb) > 64000, records[-1]
     assert max(g,b,rr,gg) < min(r,bb) // 4, records[-1]
     print(f"Live controls muted both channels for {len(dark)} packets and resumed the red/blue split at 50%.")
     print(f"All 24 direct NV16 fixture and PicCap NV12 patches matched. "
@@ -178,6 +178,7 @@ def verify(log, expected):
 
 
 def verify_chart_stream(log, reference):
+    assert reference.get("brightnessPercent") == 100, "Regenerate the chart reference at desktop maximum brightness"
     match = re.search(r"C9-CHART-STREAM\s+(\d+)\s+([A-Za-z0-9+/=\s]+?)\s+C9-CHART-END", log)
     assert match, "Missing chart stream"
     count, remainder = divmod(int(match[1]), 150)
