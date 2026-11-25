@@ -38,6 +38,21 @@ uint32_t c9_video_area_mask(double x, double y, double z)
     return mask;
 }
 
+struct hue_channel_rgb c9_mix_video_channel(uint8_t id, uint32_t mask,
+                                           const struct c9_area_color layers[C9_VIDEO_AREA_COUNT])
+{
+    struct hue_channel_rgb result = {.id = id};
+    for (unsigned i = 0; i < C9_VIDEO_AREA_COUNT; ++i) {
+        if (!(mask & (UINT32_C(1) << i))) continue;
+        const struct c9_area_color *layer = &layers[i];
+        double remaining = 1.0 - layer->alpha;
+        result.red = result.red * remaining + layer->red * layer->alpha;
+        result.green = result.green * remaining + layer->green * layer->alpha;
+        result.blue = result.blue * remaining + layer->blue * layer->alpha;
+    }
+    return result;
+}
+
 int c9_region_grid(unsigned width, unsigned height, struct screen_rect screen,
                    unsigned max_samples, struct bitmap_region *region, unsigned *budget)
 {
