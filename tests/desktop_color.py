@@ -1,10 +1,10 @@
 """Compare both color transforms and the per-channel filter to desktop CPU instructions."""
+import argparse
 import ctypes as ct
 from itertools import product
 from pathlib import Path
 import random
 import struct
-import sys
 
 from unicorn import UC_HOOK_CODE, UC_PROT_EXEC, UC_PROT_READ
 from unicorn import x86_const as x86
@@ -29,9 +29,14 @@ def scalar(vm, reg):
 
 
 def main():
-    vm = DesktopBitmap(sys.argv[1]).vm
-    data = Path(sys.argv[1]).read_bytes()
-    lib = ct.CDLL(sys.argv[2])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("desktop", type=Path)
+    parser.add_argument("library", type=Path)
+    parser.add_argument("--arm-vectors", type=Path, help="Save desktop tick outputs for the ARM package fixture")
+    args = parser.parse_args()
+    vm = DesktopBitmap(args.desktop).vm
+    data = args.desktop.read_bytes()
+    lib = ct.CDLL(str(args.library.resolve()))
     lib.c9_rgb_to_lab.argtypes = [Triple, ct.c_int]
     lib.c9_lab_to_rgb.argtypes = [Triple]
     lib.c9_filter_lab.argtypes = [Triple, Triple, ct.c_float, ct.c_float]
@@ -146,7 +151,7 @@ def main():
 
     # The same two targets reach the ARM worker over PicCap in arm_package.py.
     # Compute their first records using only desktop instructions.
-    effect = DesktopArea(sys.argv[1])
+    effect = DesktopArea(args.desktop)
     records = bytearray()
     vm.mem_write(config + 0xe8, struct.pack("<f", 1.))
     vm.mem_write(config + 0xf0, struct.pack("<d", 1./255))
@@ -158,6 +163,7 @@ def main():
     assert records == FIRST_SPLIT_RECORDS, records.hex()
     print("The ARM package fixture's first two channel records matched the desktop renderer and serializer.")
     cases = 0
+    vectors = bytearray()
     for gain in (0.25, 1, 1.5, 5):
         for nominal_fps in (24, 60, None):
             for threshold in (1, 18):
@@ -178,10 +184,14 @@ def main():
                         fps = ct.c_float(1. / (elapsed_ns / 1e9)).value
                         assert scalar(vm, regs[6]) == fps
                     queued = desktop_tick(point, fps)
+                    if args.arm_vectors:
+                        vectors.extend(struct.pack("<5f2I3f", *point, gain, fps, threshold, int(i == 0), *queued))
                     result = lib.c9_video_moderate_tick(Triple(*point),ct.byref(history),gain,fps,threshold)
                     assert max(abs(a-b) for a,b in zip(result.values(), queued)) <= 1e-5, (point, result.values(), queued)
                     cases += 1
     print(f"{cases} Video/Moderate ticks matched through the zero-delay queue, including irregular clock intervals.")
+    if args.arm_vectors:
+        args.arm_vectors.write_bytes(vectors)
 
 
 if __name__ == "__main__":

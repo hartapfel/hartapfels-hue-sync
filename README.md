@@ -13,7 +13,9 @@ The reference executable has SHA-256 `2b5c0cf7f94bb4b65fce2766586f22cf0dc0023781
 * The single-screen Video Default preset has 14 overlapping screen rectangles, each associated with a volume in the room. The capture path uses the desktop rectangle rounding and sample allocation. In Video Moderate it accepts a new regional trimean only when both the mean and the trimean change by more than two 8-bit code values in at least one channel each. Capture updates the target independently of the interpolation clock.
 * The black-bar detector probes one column and one row per frame. It uses the desktop's seeded sampling sequence and a rolling median of 201 observations to determine a symmetric active picture. A 530-frame sequence with changing letterboxes, pillarboxes, dark frames and irregular boundaries produced the same raw observations and every crop rectangle as the installed desktop detector. The linked ARM capture checker matched all 530 crop rectangles.
 
-On Windows with CMake, a C compiler, and Python with `unicorn==2.1.4` installed, run the following from this directory.
+The ARM worker compiles four numeric stages from the installed Hue Sync executable at build time. These stages are RGB to Lab, elapsed-time smoothing coefficients, the Lab history update, and Lab to RGB. The generator verifies the desktop executable's digest, reads the fixed instruction blocks and their constants, and emits an intermediate C file in the build directory. The target compiler produces native code with floating-point contraction disabled. The power function comes from the target math library. Capture, regional sampling, gain and black cutoff, playback timing, and bridge transport are implemented separately.
+
+Builds require Python, LLVM's `llvm-objdump`, CMake, a C compiler and the reference Hue Sync Desktop installation. Set `-DHUE_SYNC_DESKTOP=/path/to/HueSync.exe` and `-DLLVM_OBJDUMP=/path/to/llvm-objdump` if CMake cannot find them. On Windows, install `unicorn==2.1.4` for the desktop comparison tests and run the following from this directory.
 
 ```powershell
 cmake -S . -B build
@@ -43,10 +45,11 @@ The worker samples five interior points per tile, requires the marker and eight 
 With Zig 0.13.0 and a checkout of `webosbrew/hyperion-webos` at `00c932f092084b234b3f619b060a98fa134c12bd`, the following PowerShell commands cross-compile the checker locally and test the linked ARM code. Set `$piccap` to that checkout.
 
 ```powershell
-zig cc -target arm-linux-gnueabi.2.12 -mcpu=cortex_a9 -O2 -ffp-contract=off '-Wl,--export-dynamic' '-Wl,-T,cmake/webos-relocations.ld' "-I$piccap/unicapture" "-I$piccap/src" src/capture.c src/capture_check.c src/bitmap.c src/blackbars.c src/color.c src/video.c -ldl -lm -lrt -o build/c9-capture-check
-python tests/capture_bitmap.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/c9-capture-check
-python tests/desktop_video.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll "$env:APPDATA/HueSync/config.json" build/c9-capture-check
-python tests/desktop_bars.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/c9-capture-check
+cmake -S . -B build/arm -G Ninja -DCMAKE_BUILD_TYPE=Release --toolchain cmake/c9-zig.cmake "-DPICCAP_SOURCE_DIR=$piccap"
+cmake --build build/arm --target c9-capture-check
+python tests/capture_bitmap.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/arm/c9-capture-check
+python tests/desktop_video.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll "$env:APPDATA/HueSync/config.json" build/arm/c9-capture-check
+python tests/desktop_bars.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/arm/c9-capture-check
 ```
 
 The checker takes a capture width, height, frame rate, frame count, Y′CbCr matrix and range. It reports frame dimensions and strides, sample count, processing time across all 14 regions, and their final RGB targets. For a live run, place the capture checker beside the packaged `libdile_vt_backend.so` and release any competing capture session. Windows and emulated ARM both passed 39 capture-plane comparisons, 1,296 frame-to-target cases, and 343 room-position checks against the desktop EDK's cuboid membership routine. Boundary points can belong to multiple cuboids.
@@ -108,8 +111,11 @@ The fixture uses these files in `build/arm-vm`:
 
 ```powershell
 cmake --build build/arm --target c9-test-capture-backend
-python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.3.4_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb
+python tests/desktop_color.py 'C:/Program Files/Hue Sync/HueSync.exe' build/host-msvc/c9_bitmap.dll --arm-vectors build/arm-vm/desktop-ticks.bin
+python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.4.0_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb --desktop-vectors build/arm-vm/desktop-ticks.bin
 ```
+
+The optional desktop vectors exercise 528 Video/Moderate ticks inside the worker extracted from the IPK. Each run carries its own history through multiple colors, including black, mixed tones and highlights. On the two ARM runtimes the maximum absolute channel error against the desktop was 0.00000011921 on a 0–1 scale.
 
 The service's bridge client identifies a bridge by its certificate and bridge ID, pairs via its link button, and reads the selected Entertainment area's channel IDs and three-dimensional positions. It checks the active application before requesting start or stop. Pairing and ownership transitions are covered by the local fixture, `node tests/bridge.js`, which also runs on Node 0.12.2. A read-only check on a BSB003 bridge imported all 12 channels of the selected area. Each position matched a single desktop preset cuboid. The certificate check also passed on Windows with the C9-generation Node runtime. The public roots come from the pair documented by OpenHue. [OpenHue bridge roots](https://github.com/openhue/openhue-go/blob/main/certs.go) · [LG service runtime versions](https://webostv.developer.lge.com/develop/guides/js-service-basics)
 

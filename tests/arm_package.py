@@ -163,12 +163,18 @@ def main():
     for name in ("ipk", "assets", "qemu", "flatc", "schema", "runtime"):
         parser.add_argument(name, type=Path)
     parser.add_argument("--test-backend", type=Path, default=ROOT / "build/arm/libc9-test-capture-backend.so")
+    parser.add_argument("--desktop-vectors", type=Path, help="Tick vectors from tests/desktop_color.py --arm-vectors")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(dir=ROOT / "build") as work:
         temp = Path(work)
         vm = Initramfs()
         add_runtime(vm, args.assets, args.runtime)
         expected = add_fixture(vm, temp, args)
+        if args.desktop_vectors:
+            vectors = args.desktop_vectors.read_bytes()
+            if not vectors or len(vectors) % 40:
+                raise ValueError("Expected complete 40-byte desktop tick records")
+            vm.add("fixture/desktop-ticks", vectors)
         initrd = temp / "test.cpio.gz"
         vm.write(initrd)
         result = subprocess.run([args.qemu, "-machine", "virt", "-cpu", "cortex-a15", "-m", "256", "-smp", "2",
@@ -176,7 +182,12 @@ def main():
                                  "-nic", "none", "-no-reboot", "-kernel", args.assets / "vmlinuz", "-initrd", initrd,
                                  "-append", "console=ttyAMA0 rdinit=/init panic=-1 loglevel=3"],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=90)
-        verify(result.stdout.decode(errors="replace"), expected)
+        log = result.stdout.decode(errors="replace")
+        verify(log, expected)
+        if args.desktop_vectors:
+            summary = next(line for line in log.splitlines() if line.startswith("Desktop ticks "))
+            assert int(summary.split()[2]) == len(vectors)//40
+            print(summary)
 
 
 if __name__ == "__main__":

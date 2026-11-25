@@ -25,6 +25,9 @@ test_package() {
     [ "$?" = 1 ] && grep -Eq 'C9 video backend: lib(PmLogLib|dile_vt)\.so' missing.err || return 1
     cp /app/c9-sync /app/libc9_hue_stream.so /capture-fixture/ || return 1
     /capture-fixture/c9-sync --measure-hdr-chart direct >direct.out 2>direct.err || return 1
+    if [ -f desktop-ticks ]; then
+        grep '^Desktop ticks ' direct.err || return 1
+    fi
     cat direct.out
     /app/c9-sync --measure-hdr-chart >chart.out 2>chart.err &
     child=$!

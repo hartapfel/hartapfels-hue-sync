@@ -1,6 +1,24 @@
 cmake_minimum_required(VERSION 3.18)
 project(C9ScreenSync LANGUAGES C)
-set(processing_sources src/bitmap.c src/blackbars.c src/color.c src/video.c)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_program(HUE_SYNC_DESKTOP NAMES HueSync.exe HINTS "$ENV{ProgramFiles}/Hue Sync"
+  REQUIRED NO_CMAKE_FIND_ROOT_PATH)
+find_program(LLVM_OBJDUMP NAMES llvm-objdump HINTS "$ENV{ProgramFiles}/LLVM/bin"
+  REQUIRED NO_CMAKE_FIND_ROOT_PATH)
+set(color_generator "${CMAKE_CURRENT_SOURCE_DIR}/cmake/desktop_color.py")
+set(desktop_color "${CMAKE_CURRENT_BINARY_DIR}/desktop_color.c")
+add_custom_command(OUTPUT "${desktop_color}"
+  COMMAND "${Python3_EXECUTABLE}" "${color_generator}" "${HUE_SYNC_DESKTOP}" "${LLVM_OBJDUMP}" "${desktop_color}"
+  DEPENDS "${color_generator}" "${HUE_SYNC_DESKTOP}" "${LLVM_OBJDUMP}" VERBATIM)
+add_library(c9_desktop_color OBJECT "${desktop_color}")
+target_include_directories(c9_desktop_color PRIVATE src)
+set_target_properties(c9_desktop_color PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+  target_compile_options(c9_desktop_color PRIVATE /fp:strict)
+else()
+  target_compile_options(c9_desktop_color PRIVATE -ffp-contract=off)
+endif()
+set(processing_sources src/bitmap.c src/blackbars.c src/color.c src/video.c $<TARGET_OBJECTS:c9_desktop_color>)
 add_library(c9_bitmap SHARED ${processing_sources})
 target_include_directories(c9_bitmap PUBLIC src)
 set_target_properties(c9_bitmap PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON C_STANDARD 11)
@@ -26,10 +44,10 @@ endif()
 set(PICCAP_SOURCE_DIR "" CACHE PATH "hyperion-webos source tree providing the video backend ABI headers")
 if(PICCAP_SOURCE_DIR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_library(c9-test-capture-backend SHARED EXCLUDE_FROM_ALL tests/direct_backend.c)
-  target_include_directories(c9-test-capture-backend PRIVATE
+  target_include_directories(c9-test-capture-backend PRIVATE src
     "${PICCAP_SOURCE_DIR}/unicapture" "${PICCAP_SOURCE_DIR}/src")
   add_executable(c9-capture-check src/capture_check.c src/capture.c ${processing_sources})
-  target_include_directories(c9-capture-check PRIVATE
+  target_include_directories(c9-capture-check PRIVATE src
     "${PICCAP_SOURCE_DIR}/unicapture" "${PICCAP_SOURCE_DIR}/src")
   target_link_libraries(c9-capture-check PRIVATE m rt ${CMAKE_DL_LIBS})
   set_target_properties(c9-capture-check PROPERTIES ENABLE_EXPORTS ON C_STANDARD 11)
