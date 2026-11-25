@@ -1,7 +1,11 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; background: #101b1e; color: #f0f6f1; }
 body { font: 1.65vw/1.35 "Source Sans 3", "LG Smart UI", sans-serif; }
-main { max-width: 84vw; margin: 0 auto; padding: 3vh 0 4vh; }
+html, body { height: 100%; overflow: hidden; }
+main { height: 100vh; overflow-y: auto; margin: 0 auto; padding: 3vh 8vw 5vh; }
+#brightness { width: 34vw; padding: 0; }
+#brightnessValue { margin-left: 1vw; }
+#intensityLabel { margin-top: 1vh; }
 h1 { margin: 0 0 2vh; font-size: 3.2vw; font-weight: 500; }
 h2 { margin: 0 0 .6vh; font-size: 2.1vw; }
 p { color: #b7cbc6; margin: 1vh 0; }

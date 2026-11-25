@@ -2,6 +2,7 @@
    as the release module and fail if the worker misorders frame ownership. */
 #include <stdio.h>
 #include "unicapture.h"
+#include "quirks.h"
 #include "color.h"
 
 enum { WIDTH = 96, HEIGHT = 64, STRIDE = 102 };
@@ -47,7 +48,7 @@ static int compare_desktop_ticks(void)
 
 int capture_init(cap_backend_config_t *config, void **state)
 {
-    if (config->resolution_width != 256 || config->resolution_height != 144 ||
+    if (config->quirks != QUIRK_DILE_VT_CREATE_EX || config->resolution_width != 320 || config->resolution_height != 180 ||
         config->fps != 30 || !config->no_gui) return -1;
     if (compare_desktop_ticks() != 0) return -1;
     FILE *file = fopen("/fixture/direct.nv16", "rb");

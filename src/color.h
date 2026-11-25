@@ -12,6 +12,7 @@ float c9_temporal_alpha(float alpha_at_30hz, float fps);
 // One interpolation tick for one Video/Moderate area, audio and background
 // lighting disabled, on the standard sRGB input and gamut-correction-2 path.
 struct c9_smoothing c9_video_moderate_smoothing(float fps);
+struct c9_smoothing c9_video_smoothing(float fps, float alpha_l, float alpha_ab);
 struct c9_rgb c9_video_moderate_apply(struct c9_rgb region, struct c9_lab *history,
                                       float gain, struct c9_smoothing alpha, unsigned black_threshold);
 struct c9_rgb c9_video_moderate_tick(struct c9_rgb region, struct c9_lab *history,

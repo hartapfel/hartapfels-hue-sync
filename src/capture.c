@@ -2,6 +2,9 @@
 #include "capture.h"
 #include "unicapture.h"
 #include "log.h"
+#include "quirks.h"
+#include <errno.h>
+#include <unistd.h>
 #include <dlfcn.h>
 #include <time.h>
 
@@ -89,8 +92,18 @@ int c9_capture_video(const struct capture_settings *settings, capture_callback c
     config.resolution_height = (int)settings->height;
     config.fps = (int)settings->fps;
     config.no_gui = true;
-    if (api.init(&config, &api.state) != 0) goto close_library;
-    if (api.start(api.state) != 0) goto cleanup;
+    config.quirks = QUIRK_DILE_VT_CREATE_EX;
+    int init_result = api.init(&config, &api.state);
+    if (init_result != 0) {
+        fprintf(stderr, "DILE capture initialization failed (%d)\n", init_result);
+        if (access("/dev/mem", R_OK | W_OK) != 0 && (errno == EACCES || errno == EPERM))
+            fputs("DILE capture device access denied\n", stderr);
+        goto close_library;
+    }
+    if (api.start(api.state) != 0) {
+        fputs("DILE capture start failed\n", stderr);
+        goto cleanup;
+    }
     status = 0;
     while (!cancelled(context)) {
         frame_info_t source = {0};

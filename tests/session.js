@@ -15,7 +15,7 @@ function rejected(p, pattern) {
 }
 
 function fixture(startArea, behavior, layout) {
-    var f = { launched: 0, activated: 0, released: 0, grants: 0 };
+    var f = { launched: 0, activated: 0, released: 0, grants: 0, controls: [] };
     f.session = createSession(function () {
         ++f.launched;
         var child = new EventEmitter();
@@ -23,11 +23,13 @@ function fixture(startArea, behavior, layout) {
         child.stdout = new PassThrough();
         child.stderr = new PassThrough();
         child.stdin.on('data', function (buf) {
-            if (buf.length === 1) {
+            if (buf.length === 3) {
                 assert.equal(buf[0], 1);
+                f.controls.push([buf[1], buf[2]]);
                 ++f.grants;
                 child.stdout.write('stream'); child.stdout.write('ing\n');
-            } else assert.equal(buf.toString('ascii', 0, 4), 'C9S2');
+            } else if (buf.length === 2) f.controls.push([buf[0], buf[1]]);
+            else assert.equal(buf.toString('ascii', 0, 4), 'C9S2');
         });
         child.kill = function () { setImmediate(function () { child.emit('close', null); }); };
         setImmediate(function () { behavior(child); });
@@ -55,6 +57,8 @@ function tests() {
             assert.equal(status.state, 'streaming');
             assert.equal(first.activated, 1);
             assert.equal(first.grants, 1);
+            first.session.setPlayback(37, 2);
+            assert.deepEqual(first.controls, [[100,1], [100,1], [37,2]]);
             return Promise.all([first.session.stop(), first.session.stop()]);
         }).then(function () {
             assert.equal(first.released, 1);

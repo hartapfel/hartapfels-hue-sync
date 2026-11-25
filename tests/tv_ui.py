@@ -9,7 +9,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = """
 <script>
-var state = {state:'idle', paired:false, area:null, bridge:null, autoStart:false, source:'piccap'};
+var state = {state:'idle', paired:false, area:null, bridge:null, autoStart:false, source:'piccap', directAccess:false};
 var area = {id:'cinema', name:'Living room'};
 function PalmServiceBridge() {}
 PalmServiceBridge.prototype.cancel = function () {};
@@ -24,6 +24,7 @@ PalmServiceBridge.prototype.call = function (uri, raw) {
     else if (method === 'stop') { state.state = 'idle'; state.wakeRetry = false; }
     else if (method === 'setAutoStart') state.autoStart = p.enabled;
     else if (method === 'setSource') state.source = p.source;
+    else if (method === 'setPlayback') { state.brightness = p.brightness; state.intensity = p.intensity; }
     else if (method !== 'status') throw Error('Unexpected call ' + method);
     var response = JSON.stringify({returnValue:true,result:result});
     setTimeout(function () { self.onservicecallback(response); }, 1);
@@ -37,6 +38,7 @@ var check = function(ok, why) { if (!ok) throw Error(why); };
 var steps = [
     function () {
         check(document.activeElement === byId('host'), 'Initial remote focus');
+        check(byId('brightness').value === '100' && byId('room').textContent.indexOf('Moderate') >= 0, 'Default playback');
         check(byId('sync').disabled, 'Missing area gating');
         byId('host').value = '127.0.0.1';
         document.dispatchEvent(new KeyboardEvent('keydown', {keyCode:40,bubbles:true}));
@@ -55,10 +57,22 @@ var steps = [
     },
     function () {
         check(byId('direct').getAttribute('aria-pressed') === 'true', 'Direct video input');
+        check(byId('sourceHelp').textContent.indexOf('denied') >= 0, 'Device permission feedback');
+        check(byId('sync').disabled && byId('state').textContent.indexOf('PicCap') >= 0, 'Unavailable input gating');
         byId('piccap').click();
     },
     function () {
         check(byId('sourceHelp').textContent.indexOf('19401') >= 0, 'Local PicCap endpoint');
+        var view = document.querySelector('main');
+        view.scrollTop = 0;
+        view.dispatchEvent(new WheelEvent('wheel', {deltaY:120, bubbles:true, cancelable:true}));
+        check(view.scrollTop > 0, 'Wheel scroll');
+        byId('brightness').focus();
+        var left = new KeyboardEvent('keydown', {keyCode:37,bubbles:true,cancelable:true});
+        byId('brightness').dispatchEvent(left);
+        check(left.defaultPrevented && document.activeElement === byId('brightness') && byId('brightness').value === '99', 'Slider arrow keys');
+        for (var i=0; i<20; ++i) document.dispatchEvent(new KeyboardEvent('keydown', {keyCode:40,bubbles:true}));
+        check(document.activeElement === byId('boot') && view.scrollTop + view.clientHeight >= view.scrollHeight - 1, 'Reach end with remote');
         byId('boot').click();
     },
     function () {
@@ -67,6 +81,17 @@ var steps = [
     },
     function () {
         check(byId('sync').textContent === 'Stop sync' && byId('reload').disabled, 'Streaming state');
+        check(!byId('brightness').disabled, 'Live brightness slider enabled');
+        byId('brightness').value = 42;
+        byId('brightness').dispatchEvent(new Event('input'));
+        byId('intensities').lastElementChild.click();
+    },
+    function () {
+        check(state.brightness === 42 && state.intensity === 3, 'Live control save');
+        document.dispatchEvent(new Event('visibilitychange'));
+    },
+    function () {
+        check(byId('brightnessValue').textContent === '42%' && byId('room').textContent.indexOf('Intense') >= 0, 'Playback refresh');
         byId('sync').click();
     },
     function () {
@@ -101,7 +126,7 @@ def main():
         html = index.read_text(encoding="utf-8").replace('<script src="screen.js">', FIXTURE + '<script src="screen.js">')
         index.write_text(html.replace("</body>", CHECK + "</body>"), encoding="utf-8")
         cmd = [sys.argv[1], "--headless", "--disable-gpu", "--no-first-run", "--disable-background-networking",
-               "--disable-extensions", "--window-size=1920,1080", "--dump-dom", "--virtual-time-budget=2000",
+               "--disable-extensions", "--window-size=1920,900", "--dump-dom", "--virtual-time-budget=3000",
                "--user-data-dir=" + str(work / "profile"), index.as_uri()]
         result = subprocess.run(cmd, capture_output=True, timeout=40)
         html = result.stdout.decode("utf-8", errors="replace")

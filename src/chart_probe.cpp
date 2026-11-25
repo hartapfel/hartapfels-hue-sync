@@ -103,7 +103,7 @@ int measure_hdr_chart(bool direct, capture_cancelled interrupted) {
     probe.deadline = Clock::now() + std::chrono::seconds(90);
     std::fprintf(stderr, "Waiting for the HDR10 chart from %s\n",
                  direct ? "direct TV capture" : "PicCap on localhost:19401");
-    capture_settings settings{256, 144, 30, YUV_BT709, YUV_LIMITED};
+    capture_settings settings{320, 180, 30, YUV_BT709, YUV_LIMITED};
     auto source = direct ? c9_capture_video : c9_receive_piccap;
     int result = source(&settings, observe, &probe, finished);
     if (!probe.complete) std::fputs("No stable HDR10 chart measurement received\n", stderr);

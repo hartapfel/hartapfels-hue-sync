@@ -42,6 +42,7 @@ module.exports = function register(service, app, session) {
     add('areas', app.areas);
     add('select', function (params) { return app.select(params.id); });
     add('setSource', function (params) { return app.setSource(params.source); });
+    add('setPlayback', function (p) { return app.setPlayback(p.brightness, p.intensity); });
     add('start', start);
     add('stop', function () { boot.manualStop(); return app.stop(); });
     add('setAutoStart', function (params) { return boot.set(params.enabled); });

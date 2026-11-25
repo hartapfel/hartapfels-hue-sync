@@ -20,6 +20,10 @@ class Triple(ct.Structure):
         return self.x, self.y, self.z
 
 
+class Smoothing(ct.Structure):
+    _fields_ = [("lightness", ct.c_float), ("chroma", ct.c_float)]
+
+
 def bits(x):
     return struct.unpack("<I", struct.pack("<f", x))[0]
 
@@ -201,6 +205,26 @@ def main():
                     assert max(abs(a-b) for a,b in zip(result.values(), queued)) <= 1e-5, (point, result.values(), queued)
                     cases += 1
     print(f"{cases} Video/Moderate ticks matched through the zero-delay queue, including irregular clock intervals.")
+    lib.c9_video_smoothing.argtypes = [ct.c_float, ct.c_float, ct.c_float]
+    lib.c9_video_smoothing.restype = Smoothing
+    lib.c9_video_moderate_apply.argtypes = [Triple, ct.POINTER(Triple), ct.c_float, Smoothing, ct.c_uint]
+    lib.c9_video_moderate_apply.restype = Triple
+    vm.mem_write(config + 0xf0, struct.pack("<d", 1. / 255))
+    checked = 0
+    for lightness, chroma in ((.005,.15), (.025,.30), (.07,.5), (.5,.5)):
+        vm.mem_write(preset + 0x44, struct.pack("<ff", chroma, lightness))
+        for gain in (.05, .5, 1.):
+            vm.mem_write(config + 0xe8, struct.pack("<f", gain))
+            history = Triple()
+            vm.mem_write(frame + 0x50, bytes(history))
+            for i, point in enumerate(points[::7]):
+                fps = (24., 30., 60.)[i % 3]
+                queued = desktop_tick(point, fps)
+                alpha = lib.c9_video_smoothing(fps, lightness, chroma)
+                rgb = lib.c9_video_moderate_apply(Triple(*point),ct.byref(history),gain,alpha,1)
+                assert max(abs(a-b) for a,b in zip(rgb.values(), queued)) <= 1e-5
+                checked += 1
+    print(f"{checked} ticks across all four Video intensity presets matched Hue Desktop at three gain levels.")
     if args.arm_vectors:
         args.arm_vectors.write_bytes(vectors)
 

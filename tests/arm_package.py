@@ -158,6 +158,17 @@ def verify(log, expected):
         frames.append((r, g, b, rr, gg, bb))
     assert len(frames) >= 15 and any(r > b and bb > rr for r, g, b, rr, gg, bb in frames)
     assert min(frames[-1][1], frames[-1][4]) > 5000
+    controls = re.search(r"C9-CONTROLS-BEGIN\s+([A-Za-z0-9+/=\s]+?)\s+C9-CONTROLS-END", log)
+    assert controls, "Guest did not report the live control stream"
+    stream = base64.b64decode("".join(controls[1].split()), validate=True)
+    assert len(stream) % 66 == 0 and stream[52:66] == FIRST_SPLIT_RECORDS
+    records = [struct.unpack(">BHHHBHHH", stream[i+52:i+66]) for i in range(0, len(stream), 66)]
+    dark = [i for i, (a,r,g,b,z,rr,gg,bb) in enumerate(records) if max(r,g,b,rr,gg,bb) == 0]
+    assert len(dark) >= 3 and dark == list(range(dark[0], dark[-1]+1)) and dark[0] > 0
+    left,r,g,b,right,rr,gg,bb = records[-1]
+    assert (left,right) == (19,3) and min(r,bb) > 1000 and max(r,bb) < 64000
+    assert max(g,b,rr,gg) < min(r,bb) // 4, records[-1]
+    print(f"Live controls muted both channels for {len(dark)} packets and resumed the red/blue split at 50%.")
     print(f"All 24 direct NV16 fixture and PicCap NV12 patches matched. "
           f"The packaged worker delivered {len(frames)} decrypted two-channel frames.")
 

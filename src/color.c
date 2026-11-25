@@ -1,6 +1,11 @@
 #include "color.h"
 #include <math.h>
 
+struct c9_smoothing c9_video_moderate_smoothing(float fps)
+{
+    return c9_video_smoothing(fps, .025f, .30f);
+}
+
 float c9_temporal_alpha(float alpha_at_30hz, float fps)
 {
     return fps > 0.f ? 1.f - powf(1.f - alpha_at_30hz, 30.f / fps) : 0.f;

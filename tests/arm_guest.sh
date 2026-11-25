@@ -37,6 +37,7 @@ test_package() {
     cat chart.out
 
     test_stream split || return 1
+    test_stream controls || return 1
     if [ -f chart-descriptor ]; then test_stream chart || return 1; fi
     return 0
 }
@@ -57,6 +58,10 @@ feed_frames() {
             grep -qx streaming session.out && break
             sleep .05; cat split
         done
+        if [ "$1" = controls ]; then
+            for i in $(seq 1 55); do cat split; sleep .05; done
+            return
+        fi
         for i in $(seq 1 14); do cat split; sleep .05; done
         for i in $(seq 1 14); do cat white; sleep .05; done
     fi
@@ -67,8 +72,11 @@ test_stream() {
     if [ "$1" = chart ]; then descriptor=chart-descriptor; fi
     mkfifo peer.in worker.in
     exec 4<>worker.in
-    /app/c9-sync --wait-for-bridge <worker.in >session.out 2>session.err &
+    mode=--wait-for-bridge
+    if [ "$1" = controls ]; then mode=--live-controls; fi
+    /app/c9-sync "$mode" <worker.in >session.out 2>session.err &
     child=$!
+    if [ "$1" = controls ]; then printf '\144\001' >&4; fi
     cat "$descriptor" >&4
     wait_port && [ ! -s session.out ] || return 1
     feed_frames "$1" | nc -w 2 127.0.0.1 19401 >acks &
@@ -85,6 +93,13 @@ test_stream() {
         sleep .05
     done
     printf '\001' >&4
+    if [ "$1" = controls ]; then
+        for i in $(seq 1 100); do grep -qx streaming session.out && break; sleep .05; done
+        sleep .25
+        printf '\000\000' >&4
+        sleep .5
+        printf '\062\003' >&4
+    fi
     wait "$child"
     [ "$?" = 1 ] && grep -q 'PicCap input disconnected' session.err || return 1
     [ "$(cat session.out)" = "$(printf 'video-ready\nstreaming')" ] && [ -s acks ] || return 1
@@ -95,6 +110,10 @@ test_stream() {
         head -c 150 packets | base64
         tail -c 150 packets | base64
         echo C9-CHART-END
+    elif [ "$1" = controls ]; then
+        echo C9-CONTROLS-BEGIN
+        base64 packets
+        echo C9-CONTROLS-END
     else
         echo C9-PACKETS-BEGIN
         base64 packets

@@ -49,7 +49,10 @@ module.exports = function autoStart(service, app, session, start) {
             if (!owner || !active || generation !== token) return;
             lastError = err.message;
             var transient = /^(VIDEO_NOT_READY|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ENETDOWN|HTTP_50[234])$/.test(err.code);
-            if (err.code === 'AREA_BUSY' || (!transient && attempt >= 4)) { suppressed = true; return; }
+            if (err.code === 'AREA_BUSY' || err.code === 'CAPTURE_ACCESS_DENIED' || (!transient && attempt >= 4)) {
+                suppressed = true;
+                return;
+            }
             var delays = [2000, 5000, 10000, 20000, 30000];
             retry = setTimeout(function () { retry = null; onActive(token, attempt + 1); },
                 delays[Math.min(attempt, delays.length - 1)]);

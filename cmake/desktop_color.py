@@ -128,9 +128,9 @@ def generate(exe, objdump):
              {"xmm4":"lab.l", "xmm7":"lab.a", "xmm0":"lab.b", "xmm10":"1.f", "xmm12":"0.f"},
              {"dword ptr [rsp + 0x34]":"rgb.r", "dword ptr [rsp + 0x38]":"rgb.g",
               "dword ptr [rsp + 0x30]":"rgb.b"}, "rgb", ["struct c9_rgb rgb;"])
-    function("struct c9_smoothing c9_video_moderate_smoothing(float fps)",
+    function("struct c9_smoothing c9_video_smoothing(float fps, float alpha_l, float alpha_ab)",
              [(0x171507, 0x171513), (0x171523, 0x17155f)], {"xmm6":"fps", "xmm10":"1.f"},
-             {"dword ptr [r15 + 4*rbx + 0x48]":"0.025f", "dword ptr [r15 + 4*rbx + 0x44]":"0.30f",
+             {"dword ptr [r15 + 4*rbx + 0x48]":"alpha_l", "dword ptr [r15 + 4*rbx + 0x44]":"alpha_ab",
               "dword ptr [rsp + 0x44]":"lightness"}, "(struct c9_smoothing){lightness, xmm1}",
              ["if (!(fps > 0.f)) return (struct c9_smoothing){0.f, 0.f};", "float lightness;"])
     return "\n".join(source)

@@ -107,7 +107,7 @@ python tests/desktop_mixer.py 'C:/Program Files/Hue Sync/HueSync.exe' build/host
 
 ## Integration status
 
-The ARM worker `c9-sync` connects DILE frame capture, regional analysis, Video/Moderate interpolation, room-position mixing and the DTLS stream. The service sends the selected area, channels and pairing credential through the child's private stdin. It reports streaming after the first successful send and checks area ownership before release on cancellation or failure. Keep `libc9_hue_stream.so` beside the executable.
+The ARM worker `c9-sync` connects DILE or PicCap capture, regional analysis, Video interpolation, room-position mixing and the DTLS stream. The service sends the selected area, channels and pairing credential through the child's private stdin. It reports streaming after the first successful send and checks area ownership before release on cancellation or failure. Keep `libc9_hue_stream.so` beside the executable.
 
 The installed desktop configuration specifies 60 interpolation updates per second and zero sync delay. On its first update the desktop uses that nominal rate. On subsequent updates it calculates smoothing from the actual elapsed time. The worker does the same, sharing the lightness and chroma coefficients across zones for each tick. The local integration fixture feeds a 10 Hz red/blue split screen, introduces an 85 ms stall, and compares the decrypted RGB codes of both channels with the interpolator driven by recorded timestamps. The worker targets 50 Hue packets per second, the public EDK streaming default. Desktop packet timing and total capture-to-light latency on the physical setup still require measurement.
 
@@ -132,7 +132,7 @@ The fixture uses these files in `build/arm-vm`:
 ```powershell
 cmake --build build/arm --target c9-test-capture-backend
 python tests/desktop_color.py 'C:/Program Files/Hue Sync/HueSync.exe' build/host-msvc/c9_bitmap.dll --arm-vectors build/arm-vm/desktop-ticks.bin --chart-reference "$env:APPDATA/HueSync/config.json" build/arm-vm/desktop-chart.json
-python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.4.2_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb --desktop-vectors build/arm-vm/desktop-ticks.bin --chart-reference build/arm-vm/desktop-chart.json
+python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.5.0_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb --desktop-vectors build/arm-vm/desktop-ticks.bin --chart-reference build/arm-vm/desktop-chart.json
 ```
 
 The optional desktop vectors exercise 528 Video/Moderate ticks inside the worker extracted from the IPK. Each run carries its own history through multiple colors, including black, mixed tones and highlights. On the two ARM runtimes the maximum absolute channel error against the desktop was 0.00000011921 on a 0–1 scale.
@@ -145,7 +145,9 @@ The service's bridge client identifies a bridge by its certificate and bridge ID
 
 The C9 Screen Sync app has its own webOS package ID, private pairing storage and background service. Enter the bridge IP, press the bridge link button, pair, then choose an existing Entertainment area. Release HyperHDR's Hue stream before choosing Start sync. Closing the setup screen leaves the session running. Reopen the app to stop it.
 
-**Direct TV capture** is the default for a fresh setup. The service loads its own DILE backend and requests 256 × 144 at 30 fps. It needs access to the firmware capture device. Pause any competing capture session before starting. Existing installations keep their saved input.
+**Brightness** adjusts all lights together from 0 to 100%. The slider sets gain before the desktop color filter. Zero mutes the lights while capture continues. **Video intensity** selects Hue Desktop's Subtle, Moderate, High or Intense preset. Each preset supplies separate lightness and color response rates and a threshold for accepting frame changes. Both controls work during sync, persist across sessions and default to 100% and Moderate. With the remote, use Up and Down to move between controls and Left and Right to adjust a focused slider. The Magic Remote wheel scrolls the setup screen.
+
+**Direct TV capture** requests the C9 DILE `CreateEx` mode at 320 × 180 and 30 fps. The driver opens `/dev/mem` for reading and writing. On the tested C9 this device is owned by root and group 505 with mode 0660. The running app service and worker had UID 6980, primary group 5000, supplementary groups 44 and 777, and no effective capabilities. This installation needs PicCap for capture. The app checks access as the service account, explains a denial before starting and chooses PicCap for a new setup on an affected TV. Existing installations keep their saved input. If another installation has device access, pause competing capture before trying Direct TV capture.
 
 For **PicCap stream**, use TCP, address `127.0.0.1`, port `19401`, and leave PicCap capture running. To switch back to HyperHDR, restore PicCap's prior destination. The receiver listens only on the TV loopback interface while starting or syncing and accepts PicCap's RGB24 and NV12 frames, including padded Y and UV strides.
 

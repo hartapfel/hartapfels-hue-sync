@@ -36,5 +36,8 @@ int c9_video_ingest(struct video_region_state *state, const struct capture_bitma
 int c9_video_ingest_picture(struct video_region_state *state, const struct capture_bitmap *frame,
                             struct bitmap_region picture, struct screen_rect screen,
                             unsigned max_samples, unsigned *samples);
+int c9_video_ingest_preset(struct video_region_state *state, const struct capture_bitmap *frame,
+                           struct bitmap_region picture, struct screen_rect screen,
+                           unsigned max_samples, unsigned *samples, unsigned compare_threshold);
 struct c9_rgb c9_video_tick(struct video_region_state *state, float gain, float fps,
                             unsigned black_threshold);

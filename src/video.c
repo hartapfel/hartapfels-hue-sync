@@ -81,9 +81,8 @@ static struct c9_rgb normalize(const uint32_t rgb[3], float max_code)
     return (struct c9_rgb){rgb[0] / max_code, rgb[1] / max_code, rgb[2] / max_code};
 }
 
-static int changed(struct c9_rgb old, struct c9_rgb next)
+static int changed(struct c9_rgb old, struct c9_rgb next, float tolerance)
 {
-    const float tolerance = 2.f / 255.f;  // Video Moderate ColorsCompareTreshold
     return fabsf(old.r - next.r) > tolerance || fabsf(old.g - next.g) > tolerance ||
            fabsf(old.b - next.b) > tolerance;
 }
@@ -91,6 +90,13 @@ static int changed(struct c9_rgb old, struct c9_rgb next)
 int c9_video_ingest_picture(struct video_region_state *state, const struct capture_bitmap *frame,
                             struct bitmap_region picture, struct screen_rect screen,
                             unsigned max_samples, unsigned *samples)
+{
+    return c9_video_ingest_preset(state, frame, picture, screen, max_samples, samples, 2);
+}
+
+int c9_video_ingest_preset(struct video_region_state *state, const struct capture_bitmap *frame,
+                           struct bitmap_region picture, struct screen_rect screen,
+                           unsigned max_samples, unsigned *samples, unsigned compare_threshold)
 {
     struct bitmap_region region;
     unsigned budget;
@@ -107,7 +113,8 @@ int c9_video_ingest_picture(struct video_region_state *state, const struct captu
     struct c9_rgb trimean = normalize(result.trimean, max_code);
     struct c9_rgb average = normalize(result.average, max_code);
     // Desktop retains both previous colors when either comparison is close.
-    if (changed(state->trimean, trimean) && changed(state->average, average)) {
+    float tolerance = compare_threshold / 255.f;
+    if (changed(state->trimean, trimean, tolerance) && changed(state->average, average, tolerance)) {
         state->trimean = trimean;
         state->average = average;
     }

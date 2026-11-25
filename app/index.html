@@ -17,6 +17,17 @@
       <button id="sync" disabled>Start sync</button>
     </section>
     <section class="setup">
+      <label for="brightness">Brightness <output id="brightnessValue" for="brightness">100%</output></label>
+      <input id="brightness" type="range" min="0" max="100" step="1" value="100" disabled>
+      <h2 id="intensityLabel">Video intensity</h2>
+      <div id="intensities" role="group" aria-labelledby="intensityLabel">
+        <button data-level="0" disabled>Subtle</button>
+        <button data-level="1" disabled>Moderate</button>
+        <button data-level="2" disabled>High</button>
+        <button data-level="3" disabled>Intense</button>
+      </div>
+    </section>
+    <section class="setup">
       <h2>Hue Bridge</h2>
       <label for="host">Bridge IP address</label>
       <div class="controls"><input id="host" type="text" maxlength="45" spellcheck="false"><button id="pair">Pair bridge</button></div>

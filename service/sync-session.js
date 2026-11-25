@@ -17,7 +17,7 @@ function deferred() {
 module.exports = function createSession(launch) {
     var current = null, lastError = null;
     launch = launch || function () {
-        return spawn(path.join(__dirname, 'c9-sync'), ['--wait-for-bridge'], { stdio: ['pipe', 'pipe', 'pipe'] });
+        return spawn(path.join(__dirname, 'c9-sync'), ['--live-controls'], { stdio: ['pipe', 'pipe', 'pipe'] });
     };
 
     function status() {
@@ -61,6 +61,8 @@ module.exports = function createSession(launch) {
     function start(client, bridge, keys, area, capture) {
         if (current) return Promise.reject(new Error('A screen sync session is already in progress.'));
         var s = { state: 'starting', area: area, client: client, start: deferred(), end: deferred() };
+        s.controls = new Buffer([capture.brightness === undefined ? 100 : capture.brightness,
+                                 capture.intensity === undefined ? 1 : capture.intensity]);
         current = s;
         lastError = null;
         Promise.resolve().then(function () { return client.layout(area); }).then(function (layout) {
@@ -82,7 +84,8 @@ module.exports = function createSession(launch) {
                                 return p && p.x === ch.x && p.y === ch.y && p.z === ch.z;
                             })) throw Error('The entertainment layout changed while starting. Try again.');
                     granted = true;
-                    s.child.stdin.end(Buffer.from ? Buffer.from([1]) : new Buffer([1]));
+                    s.child.stdin.write(Buffer.concat([new Buffer([1]), s.controls]));
+                    s.canUpdate = true;
                 }).catch(function (err) { terminate(s, err); });
             }
             s.child.stderr.setEncoding('utf8');
@@ -97,6 +100,10 @@ module.exports = function createSession(launch) {
                 var error = s.failure;
                 if (s.state !== 'stopping' && !error) {
                     var message = /handshake failed/.test(diagnostic) ? 'The Hue stream handshake failed.' :
+                        /DILE capture device access denied|Creating handle to \/dev\/mem failed/.test(diagnostic) ?
+                            'webOS denied this app access to the native capture device. Use PicCap stream on this TV.' :
+                        /DILE capture start failed|DILE capture initialization failed/.test(diagnostic) ?
+                            'LG capture could not start. Pause PicCap capture and try Direct TV capture again.' :
                         /PicCap input/i.test(diagnostic) ? 'PicCap input unavailable. Set PicCap to TCP 127.0.0.1 port 19401 and start capture.' :
                         /capture failed|No video frame|video backend/i.test(diagnostic) ?
                             'TV capture failed. Check the video input and whether PicCap is using capture.' :
@@ -131,6 +138,7 @@ module.exports = function createSession(launch) {
                 if (!s.activation) error.code = 'VIDEO_NOT_READY';
                 terminate(s, error);
             }, 45000);
+            s.child.stdin.write(s.controls);
             s.child.stdin.write(descriptor, function () { descriptor.fill(0); });
         }).catch(function (err) {
             if (s.child) terminate(s, err);
@@ -139,7 +147,11 @@ module.exports = function createSession(launch) {
         return s.start.promise;
     }
 
-    return { start: start, status: status, whenEnded: function () {
+    return { start: start, status: status, setPlayback: function (brightness, intensity) {
+        if (!current || current.state === 'stopping') return;
+        current.controls = new Buffer([brightness, intensity]);
+        if (current.canUpdate) current.child.stdin.write(current.controls);
+    }, whenEnded: function () {
         return current ? current.end.promise : Promise.resolve(status());
     }, stop: function () {
         if (!current) { lastError = null; return Promise.resolve(status()); }

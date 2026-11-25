@@ -10,8 +10,11 @@
 #include <thread>
 #ifdef __linux__
 #include <sys/prctl.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #elif defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
 #include <fcntl.h>
 #include <io.h>
 #endif
@@ -40,7 +43,32 @@ struct Session {
     uint8_t key[16]{}, ids[256]{};
     uint16_t port{}, count{};
     uint32_t mask[256]{}, used{};
+    uint8_t brightness = 100, intensity = 1;
+    bool live_controls = false;
 };
+
+struct Preset { float lightness, chroma; unsigned threshold; };
+// AppMode.Video.Presets in Hue Sync Desktop 1.13.1.83.
+constexpr Preset presets[] = {{.005f,.15f,5}, {.025f,.30f,2}, {.07f,.5f,1}, {.5f,.5f,0}};
+
+bool read_controls(uint8_t& brightness, uint8_t& intensity) {
+    uint8_t pair[2];
+    if (std::fread(pair, 1, 2, stdin) != 2 || pair[0] > 100 || pair[1] >= 4) return false;
+    brightness = pair[0];
+    intensity = pair[1];
+    return true;
+}
+
+bool controls_available() {
+#ifdef _WIN32
+    DWORD bytes = 0;
+    return PeekNamedPipe(reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stdin))), nullptr, 0,
+                         nullptr, &bytes, nullptr) && bytes >= 2;
+#else
+    int bytes = 0;
+    return ioctl(STDIN_FILENO, FIONREAD, &bytes) == 0 && bytes >= 2;
+#endif
+}
 
 bool read_bytes(void *out, size_t size) { return std::fread(out, 1, size, stdin) == size; }
 unsigned u16(const uint8_t *p) { return p[0] | (unsigned(p[1]) << 8); }
@@ -76,8 +104,9 @@ bool read_session(Session& session) {
 }
 
 struct Video {
-    explicit Video(const Session& config) : session(config) { c9_bars_init(&bars); }
+    explicit Video(const Session& config) : session(config), intensity(config.intensity) { c9_bars_init(&bars); }
     const Session& session;
+    std::atomic<unsigned> intensity;
     video_region_state regions[C9_VIDEO_AREA_COUNT]{}; // capture thread only
     c9_bar_detector bars;
     std::mutex mutex;
@@ -94,10 +123,11 @@ int ingest(const capture_bitmap *frame, void *context) {
     const auto *areas = c9_video_areas();
     bitmap_region picture;
     if (!c9_active_picture(&video.bars, frame, &picture)) return -1;
+    unsigned threshold = presets[video.intensity.load()].threshold;
     for (unsigned i = 0; i < next.size(); ++i) {
         if (!(video.session.used & (1u << i))) continue;
         unsigned samples;
-        if (!c9_video_ingest_picture(&video.regions[i], frame, picture, areas[i].screen, 5000, &samples)) return -1;
+        if (!c9_video_ingest_preset(&video.regions[i], frame, picture, areas[i].screen, 5000, &samples, threshold)) return -1;
         next[i] = video.regions[i].trimean;
     }
     // Publish only a complete frame. The DILE frame stays on the capture thread.
@@ -146,6 +176,7 @@ int stream_video(Video& video, hue_stream *stream) {
     c9_area_color layers[C9_VIDEO_AREA_COUNT]{};
     hue_channel_rgb channels[256]{};
     bool ready = false;
+    uint8_t brightness = video.session.brightness, intensity = video.session.intensity;
     while (!cancelled(nullptr)) {
         Targets targets;
         {
@@ -174,13 +205,19 @@ int stream_video(Video& video, hue_stream *stream) {
                 fps = static_cast<float>(1.0 / elapsed);
             }
             previous_tick = now;
-            auto alpha = c9_video_moderate_smoothing(fps);
+            while (video.session.live_controls && controls_available()) {
+                if (!read_controls(brightness, intensity)) return 1;
+                video.intensity.store(intensity);
+            }
+            const auto& preset = presets[intensity];
+            auto alpha = c9_video_smoothing(fps, preset.lightness, preset.chroma);
 #ifdef C9_WORKER_TEST
             fixture_tick(now);
 #endif
             for (unsigned i = 0; i < targets.size(); ++i) {
                 if (!(video.session.used & (1u << i))) continue;
-                c9_rgb rgb = c9_video_moderate_apply(targets[i], &history[i], 1.f, alpha, 1);
+                c9_rgb rgb = c9_video_moderate_apply(targets[i], &history[i], brightness / 100.f, alpha, 1);
+                if (!brightness) rgb = {};
                 layers[i] = {rgb.r, rgb.g, rgb.b, 1.};
             }
             next_tick += tick;
@@ -226,8 +263,16 @@ int main(int argc, char **argv) {
         return 2;
     }
     bool wait_for_bridge = argc == 2 && std::strcmp(argv[1], "--wait-for-bridge") == 0;
-    if (argc != 1 && !wait_for_bridge) return 2;
     Session session;
+    session.live_controls = argc == 2 && std::strcmp(argv[1], "--live-controls") == 0;
+    if (argc != 1 && !wait_for_bridge && !session.live_controls) return 2;
+    if (session.live_controls) {
+        // Control updates share stdin with the initial descriptor and grant.
+        // Keep prefetched control bytes out of the C library's input buffer.
+        std::setvbuf(stdin, nullptr, _IONBF, 0);
+        if (!read_controls(session.brightness, session.intensity)) return 2;
+        wait_for_bridge = true;
+    }
     if (!read_session(session)) {
         std::fputs("Invalid screen sync session descriptor\n", stderr);
         return 2;
