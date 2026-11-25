@@ -22,9 +22,15 @@ jobs:
         shell: pwsh
         timeout-minutes: 6
         run: ./ci/reference.ps1
-      - name: Acquire pinned toolchain and packaging dependencies
+      - name: Install ARM cross-compiler
         shell: pwsh
-        run: ./ci/prepare.ps1
+        run: ./ci/prepare.ps1 Compiler
+      - name: Prepare native libraries and headers
+        shell: pwsh
+        run: ./ci/prepare.ps1 Sources
+      - name: Install webOS packager
+        shell: pwsh
+        run: ./ci/prepare.ps1 Packager
       - name: Compile ARM workers and package
         shell: pwsh
         run: |
