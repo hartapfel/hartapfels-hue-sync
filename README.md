@@ -43,7 +43,7 @@ The worker samples five interior points per tile, requires the marker and eight 
 With Zig 0.13.0 and a checkout of `webosbrew/hyperion-webos` at `00c932f092084b234b3f619b060a98fa134c12bd`, the following PowerShell commands cross-compile the checker locally and test the linked ARM code. Set `$piccap` to that checkout.
 
 ```powershell
-zig cc -target arm-linux-gnueabi.2.17 -mcpu=cortex_a9 -O2 -ffp-contract=off '-Wl,--export-dynamic' "-I$piccap/unicapture" "-I$piccap/src" src/capture.c src/capture_check.c src/bitmap.c src/blackbars.c src/color.c src/video.c -ldl -lm -o build/c9-capture-check
+zig cc -target arm-linux-gnueabi.2.12 -mcpu=cortex_a9 -O2 -ffp-contract=off '-Wl,--export-dynamic' '-Wl,-T,cmake/webos-relocations.ld' "-I$piccap/unicapture" "-I$piccap/src" src/capture.c src/capture_check.c src/bitmap.c src/blackbars.c src/color.c src/video.c -ldl -lm -lrt -o build/c9-capture-check
 python tests/capture_bitmap.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/c9-capture-check
 python tests/desktop_video.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll "$env:APPDATA/HueSync/config.json" build/c9-capture-check
 python tests/desktop_bars.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/c9-capture-check
@@ -94,6 +94,20 @@ cmake --build build/host-msvc --target c9-sync-fixture c9_bitmap
 python tests/worker_loopback.py build/host-msvc/c9-sync-fixture.exe build/host-msvc/c9_bitmap.dll (Resolve-Path build/node-v0.12.2.exe).Path 'C:/Program Files/Git/usr/bin/openssl.exe'
 python tests/piccap_loopback.py build/host-msvc/c9-sync-fixture.exe build/host-msvc/c9_bitmap.dll (Resolve-Path build/node-v0.12.2.exe).Path 'C:/Program Files/Git/usr/bin/openssl.exe' $flatc "$piccap/fbs"
 node tests/session.js
+```
+
+### Running the packaged ARM worker
+
+`tests/arm_package.py` extracts the worker, streaming library and session encoder from the IPK. It boots an isolated ARMv7 QEMU guest with loopback networking, feeds the worker PicCap frames, and decrypts the resulting two-channel Hue stream. It checks all 24 chart patches, channel IDs, sequence numbers, and the first red/blue channel records against the desktop renderer and serializer.
+
+The fixture uses these files in `build/arm-vm`:
+
+* `vmlinuz`, `alpine.tar.gz` and `openssl.apk` come from the Alpine 3.22 ARMv7 netboot LTS kernel, minirootfs 3.22.8 and OpenSSL 3.5.9-r0 respectively. [Alpine ARMv7 releases](https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/armv7/) · [Alpine ARMv7 packages](https://dl-cdn.alpinelinux.org/alpine/v3.22/main/armv7/)
+* `sdk-2026.tar.gz` is the 2026.08-webos aarch64-host SDK archive containing the arm-webos-linux-gnueabi target sysroot. Its loader checks the package's library and symbol-version dependencies. [OpenLGTV SDK release](https://github.com/openlgtv/buildroot-nc4/releases/tag/2026.08-webos)
+* Supply a Debian armel libc6 package as the final argument for the execution test. Both 2.13-38+deb7u10 and 2.24-11+deb9u4 passed the chart and DTLS tests. Running directly against all SDK 2.12.2 libraries in this guest ended during library initialization, so startup on C9 firmware still needs a device test. [Debian eglibc archive](https://archive.debian.org/debian/pool/main/e/eglibc/) · [Debian glibc archive](https://archive.debian.org/debian/pool/main/g/glibc/)
+
+```powershell
+python tests/arm_package.py build/ipk/org.webosbrew.c9screensync_0.3.3_all.ipk build/arm-vm $qemu $flatc "$piccap/fbs/hyperion_request.fbs" $armelLibcDeb
 ```
 
 The service's bridge client identifies a bridge by its certificate and bridge ID, pairs via its link button, and reads the selected Entertainment area's channel IDs and three-dimensional positions. It checks the active application before requesting start or stop. Pairing and ownership transitions are covered by the local fixture, `node tests/bridge.js`, which also runs on Node 0.12.2. A read-only check on a BSB003 bridge imported all 12 channels of the selected area. Each position matched a single desktop preset cuboid. The certificate check also passed on Windows with the C9-generation Node runtime. The public roots come from the pair documented by OpenHue. [OpenHue bridge roots](https://github.com/openhue/openhue-go/blob/main/certs.go) · [LG service runtime versions](https://webostv.developer.lge.com/develop/guides/js-service-basics)

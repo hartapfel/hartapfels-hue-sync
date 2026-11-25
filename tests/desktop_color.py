@@ -9,6 +9,8 @@ import sys
 from unicorn import UC_HOOK_CODE, UC_PROT_EXEC, UC_PROT_READ
 from unicorn import x86_const as x86
 from desktop_bitmap import DesktopBitmap, IMAGE_BASE, STACK, STATE
+from desktop_area import DesktopArea
+from worker_loopback import FIRST_SPLIT_RECORDS
 
 
 class Triple(ct.Structure):
@@ -126,6 +128,35 @@ def main():
     vm.mem_write(areas + 0x80, struct.pack("<Q", ring))
     vm.mem_write(ring + 0x10, struct.pack("<I", 1))
     vm.mem_write(ring + 0x20, struct.pack("<QQ", slot, slot + 24))
+
+    def desktop_tick(point, fps):
+        vm.mem_write(frame, struct.pack("<4fI", *point, 0, 1))
+        for reg, value in [(x86.UC_X86_REG_RSP, sp), (x86.UC_X86_REG_RBP, bp),
+                           (x86.UC_X86_REG_R15, preset), (x86.UC_X86_REG_R13, config),
+                           (x86.UC_X86_REG_RDI, areas)]:
+            vm.reg_write(reg, value)
+        for reg, value in [(6,fps),(8,12.92),(9,.055),(10,1),(12,0)]:
+            vm.reg_write(regs[reg], bits(value))
+        vm.emu_start(IMAGE_BASE + 0x1714fc, IMAGE_BASE + 0x172169, count=1700)
+        assert vm.reg_read(x86.UC_X86_REG_RIP) == IMAGE_BASE + 0x172169
+        queued = tuple(struct.unpack("<d", vm.reg_read(regs[j]).to_bytes(16, "little")[:8])[0]
+                       for j in (1, 2, 3))
+        assert queued == struct.unpack("<3d", vm.mem_read(slot, 24))
+        return queued
+
+    # The same two targets reach the ARM worker over PicCap in arm_package.py.
+    # Compute their first records using only desktop instructions.
+    effect = DesktopArea(sys.argv[1])
+    records = bytearray()
+    vm.mem_write(config + 0xe8, struct.pack("<f", 1.))
+    vm.mem_write(config + 0xf0, struct.pack("<d", 1./255))
+    for identifier, target in ((19, (1,0,0)), (3, (0,0,1))):
+        vm.mem_write(frame + 0x50, bytes(Triple()))
+        effect.set_color(desktop_tick(target, 60.))
+        layer = effect.render((0., 0., 0.))
+        records.extend(effect.channel(identifier, effect.mix([layer])))
+    assert records == FIRST_SPLIT_RECORDS, records.hex()
+    print("The ARM package fixture's first two channel records matched the desktop renderer and serializer.")
     cases = 0
     for gain in (0.25, 1, 1.5, 5):
         for nominal_fps in (24, 60, None):
@@ -146,18 +177,7 @@ def main():
                         vm.emu_start(IMAGE_BASE + 0x1723e5, IMAGE_BASE + 0x172404, count=16)
                         fps = ct.c_float(1. / (elapsed_ns / 1e9)).value
                         assert scalar(vm, regs[6]) == fps
-                    vm.mem_write(frame, struct.pack("<4fI", *point, 0, 1))
-                    for reg, value in [(x86.UC_X86_REG_RSP, sp), (x86.UC_X86_REG_RBP, bp),
-                                       (x86.UC_X86_REG_R15, preset), (x86.UC_X86_REG_R13, config),
-                                       (x86.UC_X86_REG_RDI, areas)]:
-                        vm.reg_write(reg, value)
-                    for reg, value in [(6,fps),(8,12.92),(9,.055),(10,1),(12,0)]:
-                        vm.reg_write(regs[reg], bits(value))
-                    vm.emu_start(IMAGE_BASE + 0x1714fc, IMAGE_BASE + 0x172169, count=1700)
-                    assert vm.reg_read(x86.UC_X86_REG_RIP) == IMAGE_BASE + 0x172169
-                    queued = tuple(struct.unpack("<d", vm.reg_read(regs[j]).to_bytes(16, "little")[:8])[0]
-                                   for j in (1, 2, 3))
-                    assert queued == struct.unpack("<3d", vm.mem_read(slot, 24))
+                    queued = desktop_tick(point, fps)
                     result = lib.c9_video_moderate_tick(Triple(*point),ct.byref(history),gain,fps,threshold)
                     assert max(abs(a-b) for a,b in zip(result.values(), queued)) <= 1e-5, (point, result.values(), queued)
                     cases += 1

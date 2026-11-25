@@ -15,6 +15,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 AREA = "01234567-89ab-cdef-8123-456789abcdef"
 IDENTITY = "c9-worker-test"
+# The desktop color test verifies these two serialized records from zero history.
+FIRST_SPLIT_RECORDS = bytes.fromhex("13 20c1 0000 0000 03 0dfa 0000 1f90")
 
 
 class Color(ct.Structure):
