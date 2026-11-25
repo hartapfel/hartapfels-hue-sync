@@ -21,6 +21,10 @@ extern "C" {
 #include "video.h"
 }
 
+#ifdef C9_WORKER_TEST
+void fixture_tick(std::chrono::steady_clock::time_point now);
+#endif
+
 namespace {
 using Clock = std::chrono::steady_clock;
 using Targets = std::array<c9_rgb, C9_VIDEO_AREA_COUNT>;
@@ -111,6 +115,7 @@ int stream_video(Video& video, hue_stream *stream) {
     const auto send = std::chrono::milliseconds(20);
     const auto timeout = std::chrono::seconds(5);
     auto started = Clock::now(), next_tick = started, next_send = started;
+    Clock::time_point previous_tick{};
     c9_lab history[C9_VIDEO_AREA_COUNT]{};
     c9_area_color layers[C9_VIDEO_AREA_COUNT]{};
     hue_channel_rgb channels[256]{};
@@ -137,9 +142,19 @@ int stream_video(Video& video, hue_stream *stream) {
         }
         auto now = Clock::now();
         if (now >= next_tick) {
+            float fps = 60.f;
+            if (previous_tick != Clock::time_point{}) {
+                double elapsed = std::chrono::duration<double>(now - previous_tick).count();
+                fps = static_cast<float>(1.0 / elapsed);
+            }
+            previous_tick = now;
+            auto alpha = c9_video_moderate_smoothing(fps);
+#ifdef C9_WORKER_TEST
+            fixture_tick(now);
+#endif
             for (unsigned i = 0; i < targets.size(); ++i) {
                 if (!(video.session.used & (1u << i))) continue;
-                c9_rgb rgb = c9_video_moderate_tick(targets[i], &history[i], 1.f, 60.f, 1);
+                c9_rgb rgb = c9_video_moderate_apply(targets[i], &history[i], 1.f, alpha, 1);
                 layers[i] = {rgb.r, rgb.g, rgb.b, 1.};
             }
             next_tick += tick;

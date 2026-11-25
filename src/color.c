@@ -63,8 +63,13 @@ struct c9_lab c9_filter_lab(struct c9_lab previous, struct c9_lab next, float al
     };
 }
 
-struct c9_rgb c9_video_moderate_tick(struct c9_rgb region, struct c9_lab *history,
-                                     float gain, float fps, unsigned black_threshold)
+struct c9_smoothing c9_video_moderate_smoothing(float fps)
+{
+    return (struct c9_smoothing){c9_temporal_alpha(0.025f, fps), c9_temporal_alpha(0.30f, fps)};
+}
+
+struct c9_rgb c9_video_moderate_apply(struct c9_rgb region, struct c9_lab *history,
+                                      float gain, struct c9_smoothing alpha, unsigned black_threshold)
 {
     float peak = fmaxf(region.r, fmaxf(region.g, region.b));
     if (peak > 0.f) {
@@ -74,10 +79,16 @@ struct c9_rgb c9_video_moderate_tick(struct c9_rgb region, struct c9_lab *histor
         region.b *= scale;
     }
     *history = c9_filter_lab(*history, c9_rgb_to_lab(region, 1),
-                             c9_temporal_alpha(0.025f, fps), c9_temporal_alpha(0.30f, fps));
+                             alpha.lightness, alpha.chroma);
     struct c9_rgb output = c9_lab_to_rgb(*history);
     // The mode-2 gamut function returns immediately for these clamped RGB values.
     if (fmaxf(output.r, fmaxf(output.g, output.b)) <= black_threshold / 255.0)
         return (struct c9_rgb){0.f, 0.f, 0.f};
     return output;
+}
+
+struct c9_rgb c9_video_moderate_tick(struct c9_rgb region, struct c9_lab *history,
+                                     float gain, float fps, unsigned black_threshold)
+{
+    return c9_video_moderate_apply(region, history, gain, c9_video_moderate_smoothing(fps), black_threshold);
 }

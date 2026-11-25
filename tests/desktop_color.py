@@ -103,7 +103,8 @@ def main():
     # the final black cutoff, with the desktop's preset coefficients in memory.
     for page in [0x172000, 0xc4000, 0xc5000, 0x38f000]:
         vm.mem_map(IMAGE_BASE + page, 0x1000, UC_PROT_READ | UC_PROT_EXEC)
-    for start, end in [(0x1714fc, 0x1720c3), (0xc4940, 0xc49b3), (0xc5031, 0xc504b),
+    for start, end in [(0x1714fc, 0x172169), (0x1723e5, 0x172404),
+                       (0xc4940, 0xc49b3), (0xc5031, 0xc504b),
                        (0x38f0f0, 0x38f1f9)]:
         vm.mem_write(IMAGE_BASE + start, data[start - 0xc00:end - 0xc00])
     vm.mem_map(IMAGE_BASE + 0x1406000, 0x1000, UC_PROT_READ)
@@ -120,15 +121,31 @@ def main():
     vm.mem_write(areas + 0x20, struct.pack("<QQ", frame, frame + 0x88))
     vm.mem_write(sp + 0x70, struct.pack("<Q", areas))
     vm.mem_write(areas + 0x40, struct.pack("<Q", areas + 0x80))
+    # The installed zero-ms SyncDelay makes the desktop allocate one RGB triple.
+    ring, slot = areas + 0x100, areas + 0x180
+    vm.mem_write(areas + 0x80, struct.pack("<Q", ring))
+    vm.mem_write(ring + 0x10, struct.pack("<I", 1))
+    vm.mem_write(ring + 0x20, struct.pack("<QQ", slot, slot + 24))
     cases = 0
     for gain in (0.25, 1, 1.5, 5):
-        for fps in (24, 60):
+        for nominal_fps in (24, 60, None):
             for threshold in (1, 18):
                 history = Triple(0, 0, 0)
                 vm.mem_write(frame + 0x50, bytes(history))
                 vm.mem_write(config + 0xe8, struct.pack("<f", gain))
                 vm.mem_write(config + 0xf0, struct.pack("<d", threshold / 255))
-                for point in [(0,0,0), (0.01,0.01,0.01), *points[:125:7], (1,1,1), (0,0,0)]:
+                points_for_run = [(0,0,0), (0.01,0.01,0.01), *points[:125:7], (1,1,1), (0,0,0)]
+                for i, point in enumerate(points_for_run):
+                    fps = nominal_fps or 60
+                    if nominal_fps is None and i:
+                        elapsed_ns = (16_666_667, 8_500_000, 31_400_000, 4_100_000, 89_000_000)[i % 5]
+                        vm.reg_write(x86.UC_X86_REG_RAX, 20_000_000_000 + elapsed_ns)
+                        vm.reg_write(x86.UC_X86_REG_RBX, 20_000_000_000)
+                        for idx, value in [(13, 1e9), (14, 1.)]:
+                            vm.reg_write(regs[idx], int.from_bytes(struct.pack("<d", value), "little"))
+                        vm.emu_start(IMAGE_BASE + 0x1723e5, IMAGE_BASE + 0x172404, count=16)
+                        fps = ct.c_float(1. / (elapsed_ns / 1e9)).value
+                        assert scalar(vm, regs[6]) == fps
                     vm.mem_write(frame, struct.pack("<4fI", *point, 0, 1))
                     for reg, value in [(x86.UC_X86_REG_RSP, sp), (x86.UC_X86_REG_RBP, bp),
                                        (x86.UC_X86_REG_R15, preset), (x86.UC_X86_REG_R13, config),
@@ -136,14 +153,15 @@ def main():
                         vm.reg_write(reg, value)
                     for reg, value in [(6,fps),(8,12.92),(9,.055),(10,1),(12,0)]:
                         vm.reg_write(regs[reg], bits(value))
-                    vm.emu_start(IMAGE_BASE + 0x1714fc, IMAGE_BASE + 0x1720c3, count=1600)
-                    assert vm.reg_read(x86.UC_X86_REG_RIP) == IMAGE_BASE + 0x1720c3
-                    rg = struct.unpack("<dd", vm.reg_read(regs[0]).to_bytes(16,"little"))
-                    blue, = struct.unpack("<d",vm.mem_read(bp-0x30,8))
+                    vm.emu_start(IMAGE_BASE + 0x1714fc, IMAGE_BASE + 0x172169, count=1700)
+                    assert vm.reg_read(x86.UC_X86_REG_RIP) == IMAGE_BASE + 0x172169
+                    queued = tuple(struct.unpack("<d", vm.reg_read(regs[j]).to_bytes(16, "little")[:8])[0]
+                                   for j in (1, 2, 3))
+                    assert queued == struct.unpack("<3d", vm.mem_read(slot, 24))
                     result = lib.c9_video_moderate_tick(Triple(*point),ct.byref(history),gain,fps,threshold)
-                    assert max(abs(a-b) for a,b in zip(result.values(),(*rg,blue))) <= 1e-5, (point,result.values(),rg,blue)
+                    assert max(abs(a-b) for a,b in zip(result.values(), queued)) <= 1e-5, (point, result.values(), queued)
                     cases += 1
-    print(f"{cases} ordinary Video/Moderate ticks matched through the final black cutoff.")
+    print(f"{cases} Video/Moderate ticks matched through the zero-delay queue, including irregular clock intervals.")
 
 
 if __name__ == "__main__":

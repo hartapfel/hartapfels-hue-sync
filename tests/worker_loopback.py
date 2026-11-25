@@ -21,22 +21,23 @@ class Color(ct.Structure):
     _fields_ = [(c, ct.c_float) for c in "rgb"]
 
 
-def reference_ticks(library):
+def reference_ticks(library, timestamps):
     tick = ct.CDLL(str(Path(library).resolve())).c9_video_moderate_tick
     tick.argtypes = [Color, ct.POINTER(Color), ct.c_float, ct.c_float, ct.c_uint]
     tick.restype = Color
     history = [Color(), Color()]
     result = []
-    for _ in range(120):
+    for i, timestamp in enumerate(timestamps):
+        fps = 60. if i == 0 else 1. / ((timestamp - timestamps[i-1]) / 1e9)
         codes = []
         for target, old in zip([Color(1, 0, 0), Color(0, 0, 1)], history):
-            color = tick(target, ct.byref(old), 1, 60, 1)
+            color = tick(target, ct.byref(old), 1, fps, 1)
             codes.extend(int(max(0, min(1, v)) * 65535) for v in (color.r, color.g, color.b))
         result.append(tuple(codes))
     return result
 
 
-def run(worker, node, openssl, failing, producer=None):
+def run(worker, node, openssl, failing, producer=None, slow_tick=False):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -58,6 +59,8 @@ def run(worker, node, openssl, failing, producer=None):
     env = dict(os.environ)
     if failing:
         env["C9_TEST_CAPTURE_FAIL"] = "1"
+    if slow_tick:
+        env["C9_TEST_SLOW_TICK"] = "1"
     try:
         time.sleep(.4)
         with subprocess.Popen([worker], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -84,7 +87,9 @@ def run(worker, node, openssl, failing, producer=None):
             assert proc.returncode == 1 and stdout.splitlines() == [b"streaming"] and b"PicCap input disconnected" in stderr, stderr
         else:
             assert proc.returncode == 0 and stdout.splitlines() == [b"streaming"], (stdout, stderr)
-        return packets
+        timestamps = [int(line[8:]) for line in stderr.splitlines() if line.startswith(b"tick-ns ")]
+        assert all(a < b for a, b in zip(timestamps, timestamps[1:]))
+        return packets, timestamps
     finally:
         if server.poll() is None:
             server.kill()
@@ -95,8 +100,9 @@ def main():
     worker, library, node, openssl = sys.argv[1:]
     malformed = subprocess.run([worker], input=b"C9S1", capture_output=True, timeout=5)
     assert malformed.returncode == 2 and not malformed.stdout
-    ticks = reference_ticks(library)
-    packets = run(worker, node, openssl, False)
+    packets, timestamps = run(worker, node, openssl, False, slow_tick=True)
+    assert timestamps[12] - timestamps[11] >= 80_000_000
+    ticks = reference_ticks(library, timestamps)
     size = 66
     assert len(packets) % size == 0
     count = len(packets) // size
@@ -112,7 +118,7 @@ def main():
         distinct.add(sample)
     assert len(distinct) > 12 and r > b and bb > rr
     run(worker, node, openssl, True)
-    print(f"{count} decrypted frames matched ordered Video/Moderate ticks on both channels with 10 Hz capture.")
+    print(f"{count} decrypted frames matched timed Video/Moderate ticks on both channels, including an 85 ms stall.")
     print("Malformed input and failed capture both exited without reporting an active stream.")
 
 

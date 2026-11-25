@@ -48,6 +48,7 @@ if(TARGET c9_hue_stream AND ((PICCAP_SOURCE_DIR AND CMAKE_SYSTEM_NAME STREQUAL "
   set(worker_sources src/worker.cpp src/piccap.cpp src/chart_probe.cpp ${protocol_headers} ${processing_sources})
   if(C9_WORKER_TEST)
     add_executable(c9-sync-fixture ${worker_sources} tests/worker_capture.cpp)
+    target_compile_definitions(c9-sync-fixture PRIVATE C9_WORKER_TEST)
     set(worker_target c9-sync-fixture)
   else()
     add_executable(c9-sync ${worker_sources} src/capture.c)

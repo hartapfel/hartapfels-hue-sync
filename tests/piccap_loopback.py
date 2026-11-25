@@ -38,7 +38,6 @@ def test(worker, library, node, openssl, flatc, schema_dir, tmp):
     # Padding has conspicuously different values. Every real pixel should decode as white.
     nv12 = image("NV12Image", {"width": w, "height": h, "stride_y": w+7, "stride_uv": w+8,
                  "data_y": ([235]*w + [0]*7)*h, "data_uv": ([128]*w + [0]*8)*(h//2)})
-    expected = reference_ticks(library)
 
     def feed():
         deadline = time.monotonic() + 6
@@ -70,7 +69,8 @@ def test(worker, library, node, openssl, flatc, schema_dir, tmp):
             for frame in [rgb]*15 + [nv12]*16:
                 assert send(frame) == ack
                 time.sleep(.03)
-    packets = run(worker, node, openssl, False, feed)
+    packets, timestamps = run(worker, node, openssl, False, feed)
+    expected = reference_ticks(library, timestamps)
     assert len(packets) % 66 == 0
     frames = []
     for i in range(len(packets)//66):
