@@ -1,15 +1,24 @@
 cmake_minimum_required(VERSION 3.18)
 project(C9ScreenSync LANGUAGES C)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_program(HUE_SYNC_DESKTOP NAMES HueSync.exe HINTS "$ENV{ProgramFiles}/Hue Sync"
-  REQUIRED NO_CMAKE_FIND_ROOT_PATH)
-find_program(LLVM_OBJDUMP NAMES llvm-objdump HINTS "$ENV{ProgramFiles}/LLVM/bin"
-  REQUIRED NO_CMAKE_FIND_ROOT_PATH)
-set(color_generator "${CMAKE_CURRENT_SOURCE_DIR}/cmake/desktop_color.py")
-set(desktop_color "${CMAKE_CURRENT_BINARY_DIR}/desktop_color.c")
-add_custom_command(OUTPUT "${desktop_color}"
-  COMMAND "${Python3_EXECUTABLE}" "${color_generator}" "${HUE_SYNC_DESKTOP}" "${LLVM_OBJDUMP}" "${desktop_color}"
-  DEPENDS "${color_generator}" "${HUE_SYNC_DESKTOP}" "${LLVM_OBJDUMP}" VERBATIM)
+set(C9_REFERENCE_COLOR "" CACHE FILEPATH "Verified generated desktop color source from the reference build job")
+if(C9_REFERENCE_COLOR)
+  file(SHA256 "${C9_REFERENCE_COLOR}" reference_hash)
+  if(NOT reference_hash STREQUAL "a758bf3272ef65e1c9c6ca15feb8bc03219061e28f023d34d245a741bc7b3c90")
+    message(FATAL_ERROR "Unexpected desktop color source")
+  endif()
+  set(desktop_color "${C9_REFERENCE_COLOR}")
+else()
+  find_program(HUE_SYNC_DESKTOP NAMES HueSync.exe HINTS "$ENV{ProgramFiles}/Hue Sync"
+    REQUIRED NO_CMAKE_FIND_ROOT_PATH)
+  find_program(LLVM_OBJDUMP NAMES llvm-objdump HINTS "$ENV{ProgramFiles}/LLVM/bin"
+    REQUIRED NO_CMAKE_FIND_ROOT_PATH)
+  set(color_generator "${CMAKE_CURRENT_SOURCE_DIR}/cmake/desktop_color.py")
+  set(desktop_color "${CMAKE_CURRENT_BINARY_DIR}/desktop_color.c")
+  add_custom_command(OUTPUT "${desktop_color}"
+    COMMAND "${Python3_EXECUTABLE}" "${color_generator}" "${HUE_SYNC_DESKTOP}" "${LLVM_OBJDUMP}" "${desktop_color}"
+    DEPENDS "${color_generator}" "${HUE_SYNC_DESKTOP}" "${LLVM_OBJDUMP}" VERBATIM)
+endif()
 add_library(c9_desktop_color OBJECT "${desktop_color}")
 target_include_directories(c9_desktop_color PRIVATE src)
 set_target_properties(c9_desktop_color PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)

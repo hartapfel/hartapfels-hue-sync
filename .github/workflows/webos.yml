@@ -5,43 +5,70 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-
 jobs:
-  build:
+  reference:
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 8
+    outputs:
+      color: ${{ steps.translate.outputs.color }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Extract verified desktop reference
+        shell: pwsh
+        run: ./ci/reference.ps1
+      - name: Translate and verify the numeric routines
+        id: translate
+        shell: pwsh
+        run: |
+          python cmake/desktop_color.py "$env:HUE_REFERENCE" "C:/Program Files/LLVM/bin/llvm-objdump.exe" build/reference.c
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $text = [IO.File]::ReadAllText((Resolve-Path build/reference.c)).Replace("`r`n", "`n")
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($text))
+          "color=$encoded" >> $env:GITHUB_OUTPUT
+  build:
+    needs: reference
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Extract verified desktop reference
-        shell: pwsh
-        timeout-minutes: 6
-        run: ./ci/reference.ps1
       - name: Install ARM cross-compiler
-        shell: pwsh
-        run: ./ci/prepare.ps1 Compiler
-      - name: Prepare native libraries and headers
-        shell: pwsh
-        run: ./ci/prepare.ps1 Sources
-      - name: Install webOS packager
-        shell: pwsh
-        run: ./ci/prepare.ps1 Packager
-      - name: Compile ARM workers and package
-        shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $root = (Resolve-Path build).Path
-          $env:Path = "$root/zig-toolchain/ziglang;C:/Program Files/LLVM/bin;$env:Path"
-          cmake -S . -B build/arm -G Ninja "-DHUE_SYNC_DESKTOP=$env:HUE_REFERENCE" -DCMAKE_BUILD_TYPE=Release --toolchain cmake/c9-zig.cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "-DPICCAP_SOURCE_DIR=$root/piccap" "-DMBEDTLS_SOURCE_DIR=$root/mbedtls-3.6.7" "-DFLATBUFFERS_INCLUDE_DIR=$root/flatbuffers-595bf0007ab1929570c7671f091313c8fc20644e/include" "-DFLATC_EXECUTABLE=$root/flatc/flatc.exe"
+          python3 -m pip install --target build/zig-toolchain ziglang==0.13.0
+          echo "$PWD/build/zig-toolchain/ziglang" >> "$GITHUB_PATH"
+      - name: Prepare Mbed TLS
+        run: |
+          curl -fLsS --max-time 120 --retry 1 https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2 -o build/mbedtls.tar.bz2
+          echo 'a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6  build/mbedtls.tar.bz2' | sha256sum -c
+          tar -xf build/mbedtls.tar.bz2 -C build
+      - name: Prepare FlatBuffers and PicCap
+        run: |
+          flat=595bf0007ab1929570c7671f091313c8fc20644e
+          pic=00c932f092084b234b3f619b060a98fa134c12bd
+          curl -fLsS --max-time 120 --retry 1 "https://codeload.github.com/google/flatbuffers/tar.gz/$flat" | tar -xz -C build "flatbuffers-$flat/include" "flatbuffers-$flat/LICENSE"
+          curl -fLsS --max-time 120 --retry 1 'https://github.com/google/flatbuffers/releases/download/v24.3.25/Linux.flatc.binary.g%2B%2B-13.zip' -o build/flatc.zip
+          unzip -q build/flatc.zip -d build/flatc
+          chmod +x build/flatc/flatc
+          curl -fLsS --max-time 120 --retry 1 "https://codeload.github.com/webosbrew/hyperion-webos/tar.gz/$pic" | tar -xz -C build "hyperion-webos-$pic/src" "hyperion-webos-$pic/unicapture" "hyperion-webos-$pic/fbs"
+          mv "build/hyperion-webos-$pic" build/piccap
+          curl -fLsS --max-time 120 --retry 1 https://github.com/TBSniller/piccap/releases/download/0.5.3/org.webosbrew.piccap_0.5.3_all.ipk -o build/piccap-0.5.3.ipk
+      - name: Compile workers
+        env:
+          COLOR: ${{ needs.reference.outputs.color }}
+        run: |
+          printf %s "$COLOR" | base64 -d > build/reference.c
+          cmake -S . -B build/arm -G Ninja -DCMAKE_BUILD_TYPE=Release --toolchain cmake/c9-zig.cmake -DC9_REFERENCE_COLOR="$PWD/build/reference.c" -DPICCAP_SOURCE_DIR="$PWD/build/piccap" -DMBEDTLS_SOURCE_DIR="$PWD/build/mbedtls-3.6.7" -DFLATBUFFERS_INCLUDE_DIR="$PWD/build/flatbuffers-595bf0007ab1929570c7671f091313c8fc20644e/include" -DFLATC_EXECUTABLE="$PWD/build/flatc/flatc"
           cmake --build build/arm --target c9-sync c9-capture-zones --parallel 3
-          foreach ($test in 'autostart','core-boot','session','methods','controller','capture-service','bridge','settings','modes') { node "tests/$test.js" }
-          python package.py --ares-js build/packager/node_modules/@webosose/ares-cli/bin/ares-package.js
+      - name: Test and package
+        run: |
+          for test in autostart core-boot session methods controller capture-service bridge settings modes; do node "tests/$test.js"; done
+          npm install --prefix build/packager --no-audit --no-fund --ignore-scripts @webosose/ares-cli@2.3.1
+          python3 package.py --ares-js build/packager/node_modules/@webosose/ares-cli/bin/ares-package.js
       - uses: actions/upload-artifact@v4
         with:
           name: webos-ipk
