@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C9 Screen Sync</title>
+  <link rel="stylesheet" href="screen.css">
+</head>
+<body>
+  <main>
+    <h1>C9 Screen Sync</h1>
+    <section class="session">
+      <div>
+        <h2 id="state">Connecting…</h2>
+        <p id="room">Video · Moderate</p>
+      </div>
+      <button id="sync" disabled>Start sync</button>
+    </section>
+    <section class="setup">
+      <h2>Hue Bridge</h2>
+      <label for="host">Bridge IP address</label>
+      <div class="controls"><input id="host" type="text" maxlength="45" spellcheck="false"><button id="pair">Pair bridge</button></div>
+      <p id="pairHelp">Press the link button on your Hue Bridge, then choose Pair bridge.</p>
+    </section>
+    <section class="setup">
+      <h2>Entertainment area</h2>
+      <div id="areas"></div>
+      <button id="reload" disabled>Load areas</button>
+    </section>
+    <p id="feedback" role="status" aria-live="polite"></p>
+  </main>
+  <script src="screen.js"></script>
+</body>
+</html>

@@ -79,4 +79,16 @@ node tests/session.js
 
 The service's bridge client identifies a bridge by its certificate and bridge ID, pairs via its link button, and reads the selected Entertainment area's channel IDs and three-dimensional positions. It checks the active application before requesting start or stop. Pairing and ownership transitions are covered by the local fixture, `node tests/bridge.js`, which also runs on Node 0.12.2. A read-only check on a BSB003 bridge imported all 12 channels of the selected area. Each position matched a single desktop preset cuboid. The certificate check also passed on Windows with the C9-generation Node runtime. The public roots come from the pair documented by OpenHue. [OpenHue bridge roots](https://github.com/openhue/openhue-go/blob/main/certs.go) · [LG service runtime versions](https://webostv.developer.lge.com/develop/guides/js-service-basics)
 
-End-to-end comparisons still need the effect inputs to the mixer, black-bar handling and HDR capture behavior. The encrypted stream has been tested on localhost and cross-compiled for the C9. Live pairing with a dedicated app identity, live bridge output, an installer, measured capture cost, and opt-in boot and standby recovery are pending. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)
+## TV test package
+
+The C9 Screen Sync app has its own webOS package ID, private pairing storage and background service. Enter the bridge IP, press the bridge link button, pair, then choose an existing Entertainment area. Start sync requests the area and opens the installed PicCap video backend. Pause PicCap capture and release HyperHDR's Hue stream before this step. Closing the setup screen leaves an active sync session running. Reopen the app to stop it.
+
+After compiling the ARM worker, run the following from this repository with the official ares CLI entry point:
+
+```powershell
+python package.py --ares-js /path/to/ares-cli/bin/ares-package.js
+```
+
+The packaging script checks the app and service manifests, ARM payloads, executable mode and release metadata before saving the IPK in `build/ipk`. Its inputs include Mbed TLS and the Zig runtime licenses. The TV setup screen and service use LG's JS service packaging model. [LG JS service guide](https://webostv.developer.lge.com/develop/guides/js-service-usage)
+
+End-to-end comparisons still need the effect inputs to the mixer, black-bar handling and HDR capture behavior. Live pairing with a dedicated app identity, live bridge output, measured capture cost and boot and standby recovery still require device tests. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)

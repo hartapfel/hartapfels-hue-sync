@@ -109,7 +109,9 @@ module.exports = function createSession(launch) {
         return s.start.promise;
     }
 
-    return { start: start, status: status, stop: function () {
+    return { start: start, status: status, whenEnded: function () {
+        return current ? current.end.promise : Promise.resolve(status());
+    }, stop: function () {
         if (!current) return Promise.resolve(status());
         var s = current;
         terminate(s, null);

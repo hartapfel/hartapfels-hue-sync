@@ -1,0 +1,15 @@
+{
+  "id": "org.webosbrew.c9screensync.service",
+  "services": [{
+    "name": "org.webosbrew.c9screensync.service",
+    "description": "Capture video and stream colors to the selected Hue area",
+    "commands": [
+      {"name": "status", "public": true},
+      {"name": "pair", "public": true},
+      {"name": "areas", "public": true},
+      {"name": "select", "public": true},
+      {"name": "start", "public": true},
+      {"name": "stop", "public": true}
+    ]
+  }]
+}
