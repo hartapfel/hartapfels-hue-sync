@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 project(C9ScreenSync LANGUAGES C)
-add_library(c9_bitmap SHARED src/bitmap.c src/color.c)
+add_library(c9_bitmap SHARED src/bitmap.c src/color.c src/video.c)
 target_include_directories(c9_bitmap PUBLIC src)
 set_target_properties(c9_bitmap PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON C_STANDARD 11)
 if(NOT MSVC)
@@ -9,7 +9,7 @@ endif()
 
 set(PICCAP_SOURCE_DIR "" CACHE PATH "hyperion-webos source tree providing the video backend ABI headers")
 if(PICCAP_SOURCE_DIR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  add_executable(c9-capture-check src/capture_check.c src/capture.c src/bitmap.c)
+  add_executable(c9-capture-check src/capture_check.c src/capture.c src/bitmap.c src/color.c src/video.c)
   target_include_directories(c9-capture-check PRIVATE
     "${PICCAP_SOURCE_DIR}/unicapture" "${PICCAP_SOURCE_DIR}/src")
   target_link_libraries(c9-capture-check PRIVATE m ${CMAKE_DL_LIBS})

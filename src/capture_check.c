@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "capture.h"
+#include "video.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,7 +12,7 @@ static void request_stop(int sig) { (void)sig; stop = 1; }
 struct measurement {
     unsigned frames, limit;
     uint64_t samples, processing_ns;
-    struct bitmap_result last;
+    struct video_region_state zones[C9_VIDEO_AREA_COUNT];
 };
 
 static uint64_t nanoseconds(void)
@@ -27,11 +28,14 @@ static int measure(const struct capture_bitmap *frame, void *context)
     if (!m->frames)
         printf("Frame %ux%u, format %d, strides %zu/%zu\n", frame->width, frame->height,
                frame->layout, frame->pixels.stride, frame->chroma.stride);
-    struct bitmap_region whole = {0, 0, frame->width, frame->height};
+    const struct video_area *areas = c9_video_areas();
     uint64_t start = nanoseconds();
-    if (!analyze_region(frame, whole, 1000, &m->last)) return -1;
+    for (unsigned i = 0; i < C9_VIDEO_AREA_COUNT; ++i) {
+        unsigned samples;
+        if (!c9_video_ingest(&m->zones[i], frame, areas[i].screen, 5000, &samples)) return -1;
+        m->samples += samples;
+    }
     m->processing_ns += nanoseconds() - start;
-    m->samples += m->last.samples;
     return ++m->frames == m->limit;
 }
 
@@ -63,9 +67,14 @@ int main(int argc, char **argv)
     signal(SIGTERM, request_stop);
     signal(SIGINT, request_stop);
     int ret = c9_capture_video(&settings, measure, &m, &stop);
-    if (m.frames)
-        printf("%u frames, %llu sampled pixels, %.1f us/frame for analysis, last trimean %u %u %u\n",
+    if (m.frames) {
+        printf("%u frames, %llu sampled pixels, %.1f us/frame across %d regions\n",
                m.frames, (unsigned long long)m.samples, m.processing_ns / (1000.0 * m.frames),
-               m.last.trimean[0], m.last.trimean[1], m.last.trimean[2]);
+               C9_VIDEO_AREA_COUNT);
+        for (unsigned i = 0; i < C9_VIDEO_AREA_COUNT; ++i) {
+            struct c9_rgb target = m.zones[i].trimean;
+            printf("Area %u target RGB %.4f %.4f %.4f\n", i, target.r, target.g, target.b);
+        }
+    }
     return ret == 0 && m.frames == m.limit ? 0 : 1;
 }
