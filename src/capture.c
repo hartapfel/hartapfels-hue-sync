@@ -58,9 +58,9 @@ static int borrow_bitmap(const frame_info_t *source, const struct capture_settin
 }
 
 int c9_capture_video(const struct capture_settings *settings, capture_callback consume,
-                     void *context, const volatile sig_atomic_t *stop)
+                     void *context, capture_cancelled cancelled)
 {
-    if (!settings || !consume || !stop || !settings->width || settings->width > 16384 ||
+    if (!settings || !consume || !cancelled || !settings->width || settings->width > 16384 ||
         !settings->height || settings->height > 16384 || !settings->fps || settings->fps > 60 ||
         (unsigned)settings->matrix > YUV_BT2020_NCL || (unsigned)settings->range > YUV_FULL)
         return -1;
@@ -96,10 +96,10 @@ int c9_capture_video(const struct capture_settings *settings, capture_callback c
     if (api.init(&config, &api.state) != 0) goto close_library;
     if (api.start(api.state) != 0) goto cleanup;
     status = 0;
-    while (!*stop) {
+    while (!cancelled(context)) {
         frame_info_t source = {0};
         if (api.wait(api.state) != 0) { status = -1; break; }
-        if (*stop) break;
+        if (cancelled(context)) break;
         if (api.acquire_frame(api.state, &source) != 0) { status = -1; break; }
         struct capture_bitmap frame = {0};
         int next = borrow_bitmap(&source, settings, &frame) ? consume(&frame, context) : -1;

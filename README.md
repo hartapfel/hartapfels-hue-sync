@@ -54,7 +54,7 @@ With Zig 0.13, Ninja, llvm-ar and llvm-ranlib on PATH, use the same sources to b
 
 ```powershell
 cmake -S . -B build/arm -G Ninja -DCMAKE_BUILD_TYPE=Release --toolchain cmake/c9-zig.cmake "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" "-DMBEDTLS_SOURCE_DIR=$tls" "-DPICCAP_SOURCE_DIR=$piccap"
-cmake --build build/arm --target c9_hue_stream c9-capture-check
+cmake --build build/arm --target c9-sync c9-capture-check
 ```
 
 The mixer composites the rendered colors of all matching regions in effect-layer order. For 272 cases including shared volumes, transparent layers and opaque layers, the host and linked ARM code matched the desktop mixer's three double-precision results exactly. The test supplies the rendered layers, so it can isolate composition from capture and the creation of each effect.
@@ -65,6 +65,17 @@ python tests/desktop_mixer.py 'C:/Program Files/Hue Sync/HueSync.exe' build/host
 ```
 
 ## Integration status
+
+The ARM worker `c9-sync` connects DILE frame capture, regional analysis, Video/Moderate interpolation, room-position mixing and the DTLS stream. The service sends the selected area, channels and pairing credential through the child's private stdin. It reports streaming after the first successful send and checks area ownership before release on cancellation or failure. Keep `libc9_hue_stream.so` beside the executable.
+
+The local integration fixture replaces the TV frame producer with a 10 Hz red/blue split screen. Its OpenSSL peer decrypts the worker's packets and checks both channel IDs and every RGB code against the tested Video/Moderate interpolator. The worker schedules interpolation at 60 Hz and sends at 50 Hz. The latter is the public EDK streaming default. Desktop timing with the physical bridge still requires measurement.
+
+```powershell
+cmake -S . -B build/host-msvc -DC9_WORKER_TEST=ON
+cmake --build build/host-msvc --target c9-sync-fixture c9_bitmap
+python tests/worker_loopback.py build/host-msvc/c9-sync-fixture.exe build/host-msvc/c9_bitmap.dll (Resolve-Path build/node-v0.12.2.exe).Path 'C:/Program Files/Git/usr/bin/openssl.exe'
+node tests/session.js
+```
 
 The service's bridge client identifies a bridge by its certificate and bridge ID, pairs via its link button, and reads the selected Entertainment area's channel IDs and three-dimensional positions. It checks the active application before requesting start or stop. Pairing and ownership transitions are covered by the local fixture, `node tests/bridge.js`, which also runs on Node 0.12.2. A read-only check on a BSB003 bridge imported all 12 channels of the selected area. Each position matched a single desktop preset cuboid. The certificate check also passed on Windows with the C9-generation Node runtime. The public roots come from the pair documented by OpenHue. [OpenHue bridge roots](https://github.com/openhue/openhue-go/blob/main/certs.go) · [LG service runtime versions](https://webostv.developer.lge.com/develop/guides/js-service-basics)
 

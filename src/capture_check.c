@@ -8,6 +8,7 @@
 
 static volatile sig_atomic_t stop;
 static void request_stop(int sig) { (void)sig; stop = 1; }
+static int cancelled(void *context) { (void)context; return stop; }
 
 struct measurement {
     unsigned frames, limit;
@@ -66,7 +67,7 @@ int main(int argc, char **argv)
     else return 2;
     signal(SIGTERM, request_stop);
     signal(SIGINT, request_stop);
-    int ret = c9_capture_video(&settings, measure, &m, &stop);
+    int ret = c9_capture_video(&settings, measure, &m, cancelled);
     if (m.frames) {
         printf("%u frames, %llu sampled pixels, %.1f us/frame across %d regions\n",
                m.frames, (unsigned long long)m.samples, m.processing_ns / (1000.0 * m.frames),
