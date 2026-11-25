@@ -1,6 +1,6 @@
 # C9 Screen Sync
 
-This standalone webOS project is porting the video path from the locally installed Hue Sync Desktop 1.13.1.83. The target is an LG C9 using a local video capture service and a Hue Entertainment area. The current build produces a processing library.
+This standalone webOS project is porting the video path from the locally installed Hue Sync Desktop 1.13.1.83. The target is an LG C9 using local video capture and a Hue Entertainment area. The current build produces a processing library and an ARM video capture checker.
 
 ## Desktop comparisons
 
@@ -19,6 +19,19 @@ cmake --build build --config Release
 python tests/desktop_bitmap.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll
 python tests/desktop_color.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll
 ```
+
+## C9 video capture
+
+The capture adapter loads the DILE video backend used by PicCap 0.5.3 and borrows each frame until analysis finishes. It supports RGB24, NV12 and NV16. Only pixels on the sampling grid undergo Y′CbCr decoding. Each region retains its position in the original chroma planes, including regions that start on an odd row or column. The matrix and video range are explicit inputs. Primaries and transfer-function conversion for HDR are still pending. [PicCap 0.5.3](https://github.com/TBSniller/piccap/releases/tag/0.5.3)
+
+With Zig 0.13.0 and a checkout of `webosbrew/hyperion-webos` at `00c932f092084b234b3f619b060a98fa134c12bd`, the following PowerShell commands cross-compile the checker locally and test the linked ARM code. Set `$piccap` to that checkout.
+
+```powershell
+zig cc -target arm-linux-gnueabi.2.17 -mcpu=cortex_a9 -O2 -ffp-contract=off '-Wl,--export-dynamic' "-I$piccap/unicapture" "-I$piccap/src" src/capture.c src/capture_check.c src/bitmap.c -ldl -lm -o build/c9-capture-check
+python tests/capture_bitmap.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/c9-capture-check
+```
+
+The checker takes a capture width, height, frame rate, frame count, Y′CbCr matrix and range. It reports the actual frame dimensions and strides, sampled pixel count and time spent in the analyzer. A live run requires the TV's existing video backend and exclusive use of capture. The Windows and emulated ARM analyzers both passed 39 comparisons against desktop grid and reduction results on independently decoded test inputs.
 
 ## Integration status
 

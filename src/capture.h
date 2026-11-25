@@ -1,0 +1,15 @@
+#pragma once
+#include "bitmap.h"
+#include <signal.h>
+
+struct capture_settings {
+    unsigned width, height, fps;
+    enum yuv_matrix matrix;
+    enum yuv_range range;
+};
+
+// The callback borrows the frame until it returns. Zero continues, a positive
+// value requests an orderly stop, and a negative value reports a consumer error.
+typedef int (*capture_callback)(const struct capture_bitmap *, void *);
+int c9_capture_video(const struct capture_settings *settings, capture_callback consume,
+                     void *context, const volatile sig_atomic_t *stop);

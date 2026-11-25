@@ -6,3 +6,12 @@ set_target_properties(c9_bitmap PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON C_STAND
 if(NOT MSVC)
   target_link_libraries(c9_bitmap PRIVATE m)
 endif()
+
+set(PICCAP_SOURCE_DIR "" CACHE PATH "hyperion-webos source tree providing the video backend ABI headers")
+if(PICCAP_SOURCE_DIR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(c9-capture-check src/capture_check.c src/capture.c src/bitmap.c)
+  target_include_directories(c9-capture-check PRIVATE
+    "${PICCAP_SOURCE_DIR}/unicapture" "${PICCAP_SOURCE_DIR}/src")
+  target_link_libraries(c9-capture-check PRIVATE m ${CMAKE_DL_LIBS})
+  set_target_properties(c9-capture-check PROPERTIES ENABLE_EXPORTS ON C_STANDARD 11)
+endif()
