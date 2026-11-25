@@ -22,7 +22,7 @@ function fixture(startArea, behavior) {
         child.stdin = new PassThrough();
         child.stdout = new PassThrough();
         child.stderr = new PassThrough();
-        child.stdin.on('data', function (buf) { assert.equal(buf.toString('ascii', 0, 4), 'C9S1'); });
+        child.stdin.on('data', function (buf) { assert.equal(buf.toString('ascii', 0, 4), 'C9S2'); });
         child.kill = function () { setImmediate(function () { child.emit('close', null); }); };
         setImmediate(function () { behavior(child); });
         return child;

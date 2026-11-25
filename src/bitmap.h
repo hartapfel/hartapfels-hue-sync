@@ -20,6 +20,8 @@ struct capture_bitmap {
 };
 
 struct bitmap_region { unsigned x, y, width, height; };
+int c9_bar_probe(const struct capture_bitmap *frame, unsigned col, unsigned row,
+                 unsigned *left, unsigned *top);
 struct bitmap_result {
     uint32_t average[3];
     uint32_t trimean[3];

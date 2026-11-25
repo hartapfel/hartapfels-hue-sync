@@ -17,6 +17,7 @@
 #endif
 extern "C" {
 #include "capture.h"
+#include "blackbars.h"
 #include "video.h"
 }
 
@@ -30,6 +31,7 @@ int cancelled(void *) { return stopping.load(std::memory_order_relaxed); }
 
 struct Session {
     capture_settings capture{};
+    uint8_t piccap{};
     char host[64]{}, area[37]{}, identity[129]{};
     uint8_t key[16]{}, ids[256]{};
     uint16_t port{}, count{};
@@ -43,8 +45,9 @@ bool read_session(Session& session) {
     // Local, bounded binary descriptor from the service's private stdin pipe.
     // All supported hosts and the LG C9 use little-endian IEEE binary64.
     uint8_t h[17];
-    if (!read_bytes(h, sizeof(h)) || std::memcmp(h, "C9S1", 4) ||
-        h[11] > YUV_BT2020_NCL || h[12] > YUV_FULL) return false;
+    if (!read_bytes(h, sizeof(h)) || std::memcmp(h, "C9S2", 4) ||
+        h[11] > YUV_BT2020_NCL || h[12] > YUV_FULL ||
+        !read_bytes(&session.piccap, 1) || session.piccap > 1) return false;
     session.port = u16(h + 4);
     session.capture = {u16(h + 6), u16(h + 8), h[10], yuv_matrix(h[11]), yuv_range(h[12])};
     session.count = u16(h + 13);
@@ -69,9 +72,10 @@ bool read_session(Session& session) {
 }
 
 struct Video {
-    explicit Video(const Session& config) : session(config) {}
+    explicit Video(const Session& config) : session(config) { c9_bars_init(&bars); }
     const Session& session;
     video_region_state regions[C9_VIDEO_AREA_COUNT]{}; // capture thread only
+    c9_bar_detector bars;
     std::mutex mutex;
     std::condition_variable changed;
     Targets targets{};
@@ -84,10 +88,12 @@ int ingest(const capture_bitmap *frame, void *context) {
     auto& video = *static_cast<Video *>(context);
     Targets next{};
     const auto *areas = c9_video_areas();
+    bitmap_region picture;
+    if (!c9_active_picture(&video.bars, frame, &picture)) return -1;
     for (unsigned i = 0; i < next.size(); ++i) {
         if (!(video.session.used & (1u << i))) continue;
         unsigned samples;
-        if (!c9_video_ingest(&video.regions[i], frame, areas[i].screen, 5000, &samples)) return -1;
+        if (!c9_video_ingest_picture(&video.regions[i], frame, picture, areas[i].screen, 5000, &samples)) return -1;
         next[i] = video.regions[i].trimean;
     }
     // Publish only a complete frame. The DILE frame stays on the capture thread.
@@ -157,7 +163,8 @@ int stream_video(Video& video, hue_stream *stream) {
         }
     }
     if (cancelled(nullptr)) return 0;
-    std::fputs("No video frame received for five seconds\n", stderr);
+    std::fputs(video.session.piccap ? "No PicCap input on localhost port 19401\n" :
+               "No video frame received for five seconds\n", stderr);
     return 1;
 }
 }
@@ -185,7 +192,8 @@ int main() {
     }
     Video video(session);
     std::thread capture([&] {
-        int result = c9_capture_video(&session.capture, ingest, &video, cancelled);
+        auto capture_source = session.piccap ? c9_receive_piccap : c9_capture_video;
+        int result = capture_source(&session.capture, ingest, &video, cancelled);
         if (result) std::fprintf(stderr, "Video capture failed (%d)\n", result);
         std::lock_guard<std::mutex> lock(video.mutex);
         video.capture_result = result;

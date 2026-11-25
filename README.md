@@ -11,6 +11,7 @@ The reference executable has SHA-256 `2b5c0cf7f94bb4b65fce2766586f22cf0dc0023781
 * Another 352 comparisons exercise successive frames for one light in Video mode at Moderate intensity. They cover gain, peak limiting, temporal filtering and the output black cutoff, with audio and background lighting disabled. Each output channel matched the desktop calculation within 0.00001 on a scale from zero to one.
 * The installed configuration selects CPU sampling. There is a separate OpenCL kernel in the executable. Its sampling math differs from the CPU path.
 * The single-screen Video Default preset has 14 overlapping screen rectangles, each associated with a volume in the room. The capture path uses the desktop rectangle rounding and sample allocation. In Video Moderate it accepts a new regional trimean only when both the mean and the trimean change by more than two 8-bit code values in at least one channel each. Capture updates the target independently of the interpolation clock.
+* The black-bar detector probes one column and one row per frame. It uses the desktop's seeded sampling sequence and a rolling median of 201 observations to determine a symmetric active picture. A 530-frame sequence with changing letterboxes, pillarboxes, dark frames and irregular boundaries produced the same raw observations and every crop rectangle as the installed desktop detector. The linked ARM capture checker matched all 530 crop rectangles.
 
 On Windows with CMake, a C compiler, and Python with `unicorn==2.1.4` installed, run the following from this directory.
 
@@ -28,9 +29,10 @@ The capture adapter loads the DILE video backend used by PicCap 0.5.3 and borrow
 With Zig 0.13.0 and a checkout of `webosbrew/hyperion-webos` at `00c932f092084b234b3f619b060a98fa134c12bd`, the following PowerShell commands cross-compile the checker locally and test the linked ARM code. Set `$piccap` to that checkout.
 
 ```powershell
-zig cc -target arm-linux-gnueabi.2.17 -mcpu=cortex_a9 -O2 -ffp-contract=off '-Wl,--export-dynamic' "-I$piccap/unicapture" "-I$piccap/src" src/capture.c src/capture_check.c src/bitmap.c src/color.c src/video.c -ldl -lm -o build/c9-capture-check
+zig cc -target arm-linux-gnueabi.2.17 -mcpu=cortex_a9 -O2 -ffp-contract=off '-Wl,--export-dynamic' "-I$piccap/unicapture" "-I$piccap/src" src/capture.c src/capture_check.c src/bitmap.c src/blackbars.c src/color.c src/video.c -ldl -lm -o build/c9-capture-check
 python tests/capture_bitmap.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/c9-capture-check
 python tests/desktop_video.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll "$env:APPDATA/HueSync/config.json" build/c9-capture-check
+python tests/desktop_bars.py 'C:/Program Files/Hue Sync/HueSync.exe' build/Release/c9_bitmap.dll build/c9-capture-check
 ```
 
 The checker takes a capture width, height, frame rate, frame count, Y′CbCr matrix and range. It reports frame dimensions and strides, sample count, processing time across all 14 regions, and their final RGB targets. A live run requires the TV's existing video backend and exclusive use of capture. Windows and emulated ARM both passed 39 capture-plane comparisons, 1,296 frame-to-target cases, and 343 room-position checks against the desktop EDK's cuboid membership routine. Boundary points can belong to multiple cuboids.
@@ -50,10 +52,10 @@ cmake --build build/host-msvc --target c9_hue_stream
 python tests/stream_loopback.py build/host-msvc/c9_hue_stream.dll 'C:/Program Files/Git/usr/bin/openssl.exe' 'C:/Program Files/Hue Sync/HueSync.exe'
 ```
 
-With Zig 0.13, Ninja, llvm-ar and llvm-ranlib on PATH, use the same sources to build for the TV. Set `$piccap` to the absolute path of the capture source checkout described above.
+With Zig 0.13, Ninja, llvm-ar and llvm-ranlib on PATH, use the same sources to build for the TV. Set `$piccap` to the absolute path of the capture source checkout described above. The worker builds its request verifier and reply encoder from that checkout's schemas. Set `$flatc` to the host FlatBuffers 24.3.25 compiler and `$flatbuffers` to the matching source directory. [FlatBuffers source](https://github.com/google/flatbuffers/tree/595bf0007ab1929570c7671f091313c8fc20644e)
 
 ```powershell
-cmake -S . -B build/arm -G Ninja -DCMAKE_BUILD_TYPE=Release --toolchain cmake/c9-zig.cmake "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" "-DMBEDTLS_SOURCE_DIR=$tls" "-DPICCAP_SOURCE_DIR=$piccap"
+cmake -S . -B build/arm -G Ninja -DCMAKE_BUILD_TYPE=Release --toolchain cmake/c9-zig.cmake "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" "-DMBEDTLS_SOURCE_DIR=$tls" "-DPICCAP_SOURCE_DIR=$piccap" "-DFLATC_EXECUTABLE=$flatc" "-DFLATBUFFERS_INCLUDE_DIR=$flatbuffers/include"
 cmake --build build/arm --target c9-sync c9-capture-check
 ```
 
@@ -71,9 +73,10 @@ The ARM worker `c9-sync` connects DILE frame capture, regional analysis, Video/M
 The local integration fixture replaces the TV frame producer with a 10 Hz red/blue split screen. Its OpenSSL peer decrypts the worker's packets and checks both channel IDs and every RGB code against the tested Video/Moderate interpolator. The worker schedules interpolation at 60 Hz and sends at 50 Hz. The latter is the public EDK streaming default. Desktop timing with the physical bridge still requires measurement.
 
 ```powershell
-cmake -S . -B build/host-msvc -DC9_WORKER_TEST=ON
+cmake -S . -B build/host-msvc -DC9_WORKER_TEST=ON "-DPICCAP_SOURCE_DIR=$piccap" "-DFLATC_EXECUTABLE=$flatc" "-DFLATBUFFERS_INCLUDE_DIR=$flatbuffers/include"
 cmake --build build/host-msvc --target c9-sync-fixture c9_bitmap
 python tests/worker_loopback.py build/host-msvc/c9-sync-fixture.exe build/host-msvc/c9_bitmap.dll (Resolve-Path build/node-v0.12.2.exe).Path 'C:/Program Files/Git/usr/bin/openssl.exe'
+python tests/piccap_loopback.py build/host-msvc/c9-sync-fixture.exe build/host-msvc/c9_bitmap.dll (Resolve-Path build/node-v0.12.2.exe).Path 'C:/Program Files/Git/usr/bin/openssl.exe' $flatc "$piccap/fbs"
 node tests/session.js
 ```
 
@@ -81,7 +84,9 @@ The service's bridge client identifies a bridge by its certificate and bridge ID
 
 ## TV test package
 
-The C9 Screen Sync app has its own webOS package ID, private pairing storage and background service. Enter the bridge IP, press the bridge link button, pair, then choose an existing Entertainment area. Start sync requests the area and opens the installed PicCap video backend. Pause PicCap capture and release HyperHDR's Hue stream before this step. Closing the setup screen leaves an active sync session running. Reopen the app to stop it.
+The C9 Screen Sync app has its own webOS package ID, private pairing storage and background service. Enter the bridge IP, press the bridge link button, pair, then choose an existing Entertainment area. Release HyperHDR's Hue stream before choosing Start sync. Closing the setup screen leaves the session running. Reopen the app to stop it.
+
+**PicCap stream** is the default input for new setups. In PicCap, use TCP, address `127.0.0.1`, port `19401`, and leave capture running. To switch back to HyperHDR, restore PicCap's prior destination. The receiver listens only on the TV loopback interface while starting or syncing. It accepts PicCap's RGB24 and NV12 frames, including padded Y and UV strides. With **Direct TV capture**, pause PicCap first. This option needs the installed DILE backend and permission to access its capture device. Paired installations of the previous version retain direct capture until another input is selected.
 
 After compiling the ARM worker, run the following from this repository with the official ares CLI entry point:
 
@@ -93,4 +98,4 @@ The packaging script checks the app and service manifests, ARM payloads, executa
 
 **Start sync on power-on** is off by default. Enabling it checks access to the TV's power state before registering a persistent webOS activity. A fresh service handles cold boot. During Quick Start standby, it listens for the panel to wake, then requests the selected area. The service releases its session on standby. The local lifecycle tests exercise both paths with simulated webOS responses. A real cold boot and remote-control wake are required to confirm the C9 firmware delivers those callbacks. [LG Activity Manager](https://webostv.developer.lge.com/develop/references/activity-manager)
 
-End-to-end comparisons still need the effect inputs to the mixer, black-bar handling and HDR capture behavior. Live pairing with a dedicated app identity, live bridge output, measured capture cost and boot and standby recovery still require device tests. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)
+End-to-end comparisons still need the effect inputs to the mixer and the HDR capture behavior. Live pairing with a dedicated app identity, live bridge output, measured capture cost and boot and standby recovery still require device tests. PicCap's underlying capture project supplies the C9-generation video backend and frame plane/stride API. [webOS capture backend](https://github.com/webosbrew/hyperion-webos)

@@ -1,5 +1,6 @@
 """Exercise the service descriptor, frame processing, and encrypted worker output together."""
 import ctypes as ct
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -35,7 +36,7 @@ def reference_ticks(library):
     return result
 
 
-def run(worker, node, openssl, failing):
+def run(worker, node, openssl, failing, producer=None):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -44,6 +45,8 @@ def run(worker, node, openssl, failing):
             {"id": AREA, "channels": [{"id": 19, "x": -.8, "y": .8, "z": .8},
                                      {"id": 3, "x": .8, "y": .8, "z": .8}]},
             {"width": 128, "height": 72, "fps": 10, "matrix": 1, "range": 0}, port]
+    if producer:
+        args[3]["source"] = "piccap"
     js = ("var s='';process.stdin.on('data',function(d){s+=d;});process.stdin.on('end',function(){"
           "process.stdout.write(require('./service/worker-session').apply(null,JSON.parse(s)));});")
     descriptor = subprocess.run([node, "-e", js], cwd=ROOT, input=json.dumps(args).encode(),
@@ -58,14 +61,27 @@ def run(worker, node, openssl, failing):
     try:
         time.sleep(.4)
         with subprocess.Popen([worker], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, env=env) as proc:
-            stdout, stderr = proc.communicate(descriptor, timeout=20)
-        # Keep the peer's stdin open until the worker closes its DTLS session.
-        server.wait(timeout=8)
-        packets, errors = server.communicate()
+                              stderr=subprocess.PIPE, env=env) as proc, ThreadPoolExecutor(2) as pool:
+            receiver = pool.submit(server.stdout.read)
+            feed = pool.submit(producer) if producer else None
+            try:
+                stdout, stderr = proc.communicate(descriptor, timeout=20)
+                if feed:
+                    feed.result()
+                # Keep stdin open until the DTLS close, draining stdout during streaming.
+                server.wait(timeout=8)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                if server.poll() is None:
+                    server.kill()
+            packets = receiver.result()
+        errors = server.stderr.read()
         assert server.returncode == 0, errors
         if failing:
             assert proc.returncode == 1 and not stdout and not packets and b"capture failed" in stderr, stderr
+        elif producer:
+            assert proc.returncode == 1 and stdout.splitlines() == [b"streaming"] and b"PicCap input disconnected" in stderr, stderr
         else:
             assert proc.returncode == 0 and stdout.splitlines() == [b"streaming"], (stdout, stderr)
         return packets

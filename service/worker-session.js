@@ -11,11 +11,12 @@ function encode(bridge, keys, area, capture, port) {
         typeof keys.clientKey !== 'string' || !/^[0-9a-f]{32}$/i.test(keys.clientKey) ||
         !Array.isArray(area.channels) || !integer(area.channels.length, 1, 256) ||
         !integer(capture.width, 1, 16384) || !integer(capture.height, 1, 16384) ||
-        !integer(capture.fps, 1, 60) || !integer(capture.matrix, 0, 2) || !integer(capture.range, 0, 1))
+        !integer(capture.fps, 1, 60) || !integer(capture.matrix, 0, 2) || !integer(capture.range, 0, 1) ||
+        (capture.source !== undefined && capture.source !== 'direct' && capture.source !== 'piccap'))
         throw new Error('Invalid screen sync session.');
-    var size = 17 + bridge.host.length + keys.applicationKey.length + 36 + 16 + area.channels.length * 25;
+    var size = 18 + bridge.host.length + keys.applicationKey.length + 36 + 16 + area.channels.length * 25;
     var out = Buffer.alloc ? Buffer.alloc(size) : new Buffer(size);
-    out.write('C9S1', 0, 4, 'ascii');
+    out.write('C9S2', 0, 4, 'ascii');
     out.writeUInt16LE(port, 4);
     out.writeUInt16LE(capture.width, 6);
     out.writeUInt16LE(capture.height, 8);
@@ -25,7 +26,8 @@ function encode(bridge, keys, area, capture, port) {
     out.writeUInt16LE(area.channels.length, 13);
     out[15] = bridge.host.length;
     out[16] = keys.applicationKey.length;
-    var offset = 17;
+    out[17] = capture.source === 'piccap' ? 1 : 0;
+    var offset = 18;
     [bridge.host, keys.applicationKey, area.id].forEach(function (value) {
         offset += out.write(value, offset, value.length, 'ascii');
     });

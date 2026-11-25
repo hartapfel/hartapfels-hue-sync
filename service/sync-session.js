@@ -76,6 +76,7 @@ module.exports = function createSession(launch) {
                 var error = s.failure;
                 if (s.state !== 'stopping' && !error) {
                     var message = /handshake failed/.test(diagnostic) ? 'The Hue stream handshake failed.' :
+                        /PicCap input/i.test(diagnostic) ? 'PicCap input unavailable. Set PicCap to TCP 127.0.0.1 port 19401 and start capture.' :
                         /capture failed|No video frame|video backend/i.test(diagnostic) ?
                             'TV capture failed. Check the video input and whether PicCap is using capture.' :
                             'The screen capture worker exited.';

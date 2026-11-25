@@ -66,6 +66,7 @@ def main():
     parser.add_argument("--arm", type=Path, default=ROOT / "build/arm")
     parser.add_argument("--mbedtls", type=Path, default=ROOT / "build/mbedtls-3.6.7")
     parser.add_argument("--zig-lib", type=Path, default=ROOT / "build/zig-toolchain/ziglang/lib")
+    parser.add_argument("--flatbuffers", type=Path, default=ROOT / "build/flatbuffers-595bf0007ab1929570c7671f091313c8fc20644e")
     parser.add_argument("--output", type=Path, default=ROOT / "build/ipk")
     args = parser.parse_args()
     info = json.loads((ROOT / "app/appinfo.json").read_bytes())
@@ -78,6 +79,7 @@ def main():
         for name in ("c9-sync", "libc9_hue_stream.so"):
             shutil.copyfile(args.arm / name, service / name)
         shutil.copyfile(args.mbedtls / "LICENSE", service / "LICENSE-mbedTLS.txt")
+        shutil.copyfile(args.flatbuffers / "LICENSE", service / "LICENSE-FlatBuffers.txt")
         for name in ("libcxx", "libcxxabi", "libunwind"):
             shutil.copyfile(args.zig_lib / name / "LICENSE.TXT", service / ("LICENSE-" + name + ".txt"))
         subprocess.run(["node", str(args.ares_js.resolve()), str(app), str(service),

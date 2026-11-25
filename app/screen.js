@@ -41,6 +41,13 @@
         el('boot').disabled = pending || (!s.autoStart && !s.area);
         el('boot').setAttribute('aria-pressed', String(!!s.autoStart));
         el('boot').textContent = 'Start sync on power-on · ' + (s.autoStart ? 'On' : 'Off');
+        ['piccap', 'direct'].forEach(function (source) {
+            el(source).disabled = pending || !idle;
+            el(source).setAttribute('aria-pressed', String(s.source === source));
+        });
+        el('sourceHelp').textContent = s.source === 'piccap' ?
+            'In PicCap, turn off Unix socket mode and send video to 127.0.0.1 on port 19401. Leave PicCap capture running.' :
+            s.source === 'direct' ? 'Pause PicCap capture before starting direct TV capture.' : '';
         el('pairHelp').textContent = s.bridge ? 'Paired with ' + s.bridge.name + ' (' + s.bridge.host + ').' :
             'Press the link button on your Hue Bridge, then choose Pair bridge.';
         if (s.bridge && s.bridge.host !== lastBridge) {
@@ -87,6 +94,11 @@
         }, el('pair'));
     };
     el('reload').onclick = function () { action(reload, el('reload')); };
+    ['piccap', 'direct'].forEach(function (source) {
+        el(source).onclick = function () {
+            action(function () { return call('setSource', {source: source}).then(update); }, el(source));
+        };
+    });
     el('boot').onclick = function () {
         action(function () { return call('setAutoStart', {enabled: !state.autoStart}).then(update); }, el('boot'));
     };

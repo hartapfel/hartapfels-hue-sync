@@ -33,5 +33,8 @@ int c9_region_grid(unsigned width, unsigned height, struct screen_rect screen,
 // state per zone, ingest on capture, then tick at the interpolation rate.
 int c9_video_ingest(struct video_region_state *state, const struct capture_bitmap *frame,
                     struct screen_rect screen, unsigned max_samples, unsigned *samples);
+int c9_video_ingest_picture(struct video_region_state *state, const struct capture_bitmap *frame,
+                            struct bitmap_region picture, struct screen_rect screen,
+                            unsigned max_samples, unsigned *samples);
 struct c9_rgb c9_video_tick(struct video_region_state *state, float gain, float fps,
                             unsigned black_threshold);

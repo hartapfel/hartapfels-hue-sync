@@ -4,13 +4,20 @@
 // Settings writes serialize with starts; stop always reaches a pending start.
 module.exports = function controller(hue, store, session) {
     var settings, writing = false;
-    var loaded = store.load().then(function (value) { settings = value; });
+    var loaded = store.load().then(function (value) {
+        settings = value;
+        if (!settings.source) settings.source = settings.keys ? 'direct' : 'piccap';
+    });
     function status() {
         var state = session.status();
         return { state: state.state, error: state.error, bridge: settings.bridge || null,
-            paired: Boolean(settings.keys), area: settings.area || null, autoStart: settings.autoStart === true };
+            paired: Boolean(settings.keys), area: settings.area || null, autoStart: settings.autoStart === true,
+            source: settings.source };
     }
-    function commit(next) {
+    function commit(changes) {
+        var next = {};
+        Object.keys(settings).forEach(function (key) { next[key] = settings[key]; });
+        Object.keys(changes).forEach(function (key) { next[key] = changes[key]; });
         return store.save(next).then(function () { settings = next; return status(); });
     }
     function edit(fn, allowStreaming) {
@@ -34,8 +41,7 @@ module.exports = function controller(hue, store, session) {
                 return hue.identify(host).then(function (bridge) {
                     return hue.pair(bridge).then(function (keys) {
                         var same = settings.bridge && settings.bridge.id === bridge.id;
-                        return commit({ version: 1, bridge: bridge, keys: keys, area: same ? settings.area : null,
-                            autoStart: settings.autoStart === true, bootRegistration: settings.bootRegistration });
+                        return commit({ bridge: bridge, keys: keys, area: same ? settings.area : null });
                     });
                 });
             });
@@ -44,9 +50,7 @@ module.exports = function controller(hue, store, session) {
         select: function (id) {
             return edit(function () {
                 return client().layout(id).then(function (area) {
-                    return commit({ version: 1, bridge: settings.bridge, keys: settings.keys,
-                        area: { id: area.id, name: area.name }, autoStart: settings.autoStart === true,
-                        bootRegistration: settings.bootRegistration });
+                    return commit({ area: { id: area.id, name: area.name } });
                 });
             });
         },
@@ -60,9 +64,14 @@ module.exports = function controller(hue, store, session) {
             return edit(function () {
                 if (typeof enabled !== 'boolean') throw Error('Choose a startup setting.');
                 if (enabled && !settings.area) throw Error('Select an entertainment area first.');
-                return commit({version: 1, bridge: settings.bridge, keys: settings.keys,
-                    area: settings.area, autoStart: enabled, bootRegistration: enabled ? registration : undefined});
+                return commit({autoStart: enabled, bootRegistration: enabled ? registration : undefined});
             }, true);
+        },
+        setSource: function (source) {
+            return edit(function () {
+                if (source !== 'direct' && source !== 'piccap') throw Error('Unknown video input.');
+                return commit({ source: source });
+            });
         },
         start: function () {
             return loaded.then(function () {
@@ -70,7 +79,7 @@ module.exports = function controller(hue, store, session) {
                 var connection = client();
                 if (!settings.area) throw Error('Select an entertainment area first.');
                 return session.start(connection, settings.bridge, settings.keys, settings.area.id,
-                    { width: 256, height: 144, fps: 30, matrix: 1, range: 0 });
+                    { source: settings.source, width: 256, height: 144, fps: 30, matrix: 1, range: 0 });
             });
         },
         stop: function () { return loaded.then(function () { return session.stop(); }); }

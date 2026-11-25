@@ -49,14 +49,9 @@ static int covers(struct bitmap_plane plane, unsigned rows, unsigned row_bytes)
            (rows == 1 || plane.stride <= (plane.available - row_bytes) / (rows - 1));
 }
 
-int analyze_region(const struct capture_bitmap *frame, struct bitmap_region region,
-                   unsigned budget, struct bitmap_result *result)
+static int valid_frame(const struct capture_bitmap *frame)
 {
-    const unsigned width = region.width, height = region.height;
-    if (!frame || !result || !width || !height || !budget || budget > 65536 ||
-        frame->width > 16384 || frame->height > 16384 ||
-        width > frame->width || height > frame->height ||
-        region.x > frame->width - width || region.y > frame->height - height ||
+    if (!frame || !frame->width || !frame->height || frame->width > 16384 || frame->height > 16384 ||
         (unsigned)frame->layout > NV16)
         return 0;
 
@@ -65,14 +60,72 @@ int analyze_region(const struct capture_bitmap *frame, struct bitmap_region regi
     const unsigned bytes_per_pixel = planar ? 1 : layout == RGB24 ? 3 : 4;
     if (!covers(frame->pixels, frame->height, frame->width * bytes_per_pixel))
         return 0;
-    const struct yuv_coefficients *matrix = NULL;
     if (planar) {
         unsigned chroma_rows = layout == NV12 ? (frame->height + 1) / 2 : frame->height;
         if ((unsigned)frame->matrix > YUV_BT2020_NCL || (unsigned)frame->range > YUV_FULL ||
             !covers(frame->chroma, chroma_rows, (frame->width + 1) / 2 * 2))
             return 0;
-        matrix = &coefficients[frame->matrix][frame->range];
     }
+    return 1;
+}
+
+static inline void pixel(const struct capture_bitmap *frame, unsigned x, unsigned y, unsigned rgb[3])
+{
+    enum pixel_layout layout = frame->layout;
+    const uint8_t *row = frame->pixels.data + y * frame->pixels.stride;
+    if (layout == NV12 || layout == NV16) {
+        const struct yuv_coefficients *matrix = &coefficients[frame->matrix][frame->range];
+        unsigned cy = layout == NV12 ? y / 2 : y;
+        const uint8_t *uv = frame->chroma.data + cy * frame->chroma.stride + (x / 2) * 2;
+        int u = uv[0] - 128, v = uv[1] - 128;
+        int luma = ((int)row[x] - (frame->range == YUV_LIMITED ? 16 : 0)) * matrix->y;
+        rgb[0] = channel8(luma + v * matrix->rv);
+        rgb[1] = channel8(luma + u * matrix->gu + v * matrix->gv);
+        rgb[2] = channel8(luma + u * matrix->bu);
+    } else if (layout == RGB10A2) {
+        const uint8_t *p = row + 4 * x;
+        rgb[0] = p[0] | ((p[1] & 3u) << 8);
+        rgb[1] = (p[1] >> 2) | ((p[2] & 15u) << 6);
+        rgb[2] = (p[2] >> 4) | ((p[3] & 63u) << 4);
+    } else {
+        const uint8_t *p = row + (layout == RGB24 ? 3 : 4) * x;
+        rgb[0] = p[layout == BGRX8 ? 2 : 0];
+        rgb[1] = p[1];
+        rgb[2] = p[layout == BGRX8 ? 0 : 2];
+    }
+}
+
+static unsigned rgb_sum(const struct capture_bitmap *frame, unsigned x, unsigned y)
+{
+    unsigned rgb[3];
+    pixel(frame, x, y, rgb);
+    return rgb[0] + rgb[1] + rgb[2];
+}
+
+int c9_bar_probe(const struct capture_bitmap *frame, unsigned col, unsigned row,
+                 unsigned *left, unsigned *top)
+{
+    if (!valid_frame(frame) || !left || !top || col >= frame->width || row >= frame->height) return 0;
+    unsigned rows = (unsigned)(.23f * frame->height), cols = (unsigned)(.23f * frame->width);
+    unsigned threshold = frame->layout == RGB10A2 ? 36 : 9;
+    unsigned y = 0, x = 0;
+    while (y < rows && rgb_sum(frame, col, y) <= threshold) ++y;
+    while (x < cols && rgb_sum(frame, x, row) <= threshold) ++x;
+    // The desktop retains the exhausted horizontal scan length if the
+    // vertical probe found picture. If both miss, it records two zeroes.
+    *top = y < rows ? y : 0;
+    *left = y < rows || x < cols ? x : 0;
+    return 1;
+}
+
+int analyze_region(const struct capture_bitmap *frame, struct bitmap_region region,
+                   unsigned budget, struct bitmap_result *result)
+{
+    const unsigned width = region.width, height = region.height;
+    if (!valid_frame(frame) || !result || !width || !height || !budget || budget > 65536 ||
+        width > frame->width || height > frame->height ||
+        region.x > frame->width - width || region.y > frame->height - height)
+        return 0;
 
     unsigned bins[3][1024] = {0};
     struct bitmap_result out = {0};
@@ -89,25 +142,8 @@ int analyze_region(const struct capture_bitmap *frame, struct bitmap_region regi
             if (y >= height)
                 break;
             unsigned px = region.x + x, py = region.y + y;
-            const uint8_t *p = frame->pixels.data + py * frame->pixels.stride + bytes_per_pixel * px;
             unsigned rgb[3];
-            if (planar) {
-                unsigned cy = layout == NV12 ? py / 2 : py;
-                const uint8_t *uv = frame->chroma.data + cy * frame->chroma.stride + (px / 2) * 2;
-                int u = uv[0] - 128, v = uv[1] - 128;
-                int luma = ((int)*p - (frame->range == YUV_LIMITED ? 16 : 0)) * matrix->y;
-                rgb[0] = channel8(luma + v * matrix->rv);
-                rgb[1] = channel8(luma + u * matrix->gu + v * matrix->gv);
-                rgb[2] = channel8(luma + u * matrix->bu);
-            } else if (layout == RGB10A2) {
-                rgb[0] = p[0] | ((p[1] & 3u) << 8);
-                rgb[1] = (p[1] >> 2) | ((p[2] & 15u) << 6);
-                rgb[2] = (p[2] >> 4) | ((p[3] & 63u) << 4);
-            } else {
-                rgb[0] = p[layout == BGRX8 ? 2 : 0];
-                rgb[1] = p[1];
-                rgb[2] = p[layout == BGRX8 ? 0 : 2];
-            }
+            pixel(frame, px, py, rgb);
             for (unsigned c = 0; c < 3; ++c) {
                 ++bins[c][rgb[c]];
                 out.average[c] += rgb[c];
@@ -117,7 +153,7 @@ int analyze_region(const struct capture_bitmap *frame, struct bitmap_region regi
     }
     for (unsigned c = 0; c < 3; ++c) {
         out.average[c] /= out.samples;
-        out.trimean[c] = channel_trimean(bins[c], layout == RGB10A2 ? 1024 : 256, out.samples);
+        out.trimean[c] = channel_trimean(bins[c], frame->layout == RGB10A2 ? 1024 : 256, out.samples);
     }
     *result = out;
     return 1;

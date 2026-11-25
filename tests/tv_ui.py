@@ -9,7 +9,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = """
 <script>
-var state = {state:'idle', paired:false, area:null, bridge:null, autoStart:false};
+var state = {state:'idle', paired:false, area:null, bridge:null, autoStart:false, source:'piccap'};
 var area = {id:'cinema', name:'Living room'};
 function PalmServiceBridge() {}
 PalmServiceBridge.prototype.cancel = function () {};
@@ -23,6 +23,7 @@ PalmServiceBridge.prototype.call = function (uri, raw) {
     else if (method === 'start') state.state = 'streaming';
     else if (method === 'stop') state.state = 'idle';
     else if (method === 'setAutoStart') state.autoStart = p.enabled;
+    else if (method === 'setSource') state.source = p.source;
     else if (method !== 'status') throw Error('Unexpected call ' + method);
     var response = JSON.stringify({returnValue:true,result:result});
     setTimeout(function () { self.onservicecallback(response); }, 1);
@@ -49,6 +50,15 @@ var steps = [
     },
     function () {
         check(!byId('sync').disabled, 'Area selection');
+        check(byId('piccap').getAttribute('aria-pressed') === 'true', 'Initial PicCap input');
+        byId('direct').click();
+    },
+    function () {
+        check(byId('direct').getAttribute('aria-pressed') === 'true', 'Direct video input');
+        byId('piccap').click();
+    },
+    function () {
+        check(byId('sourceHelp').textContent.indexOf('19401') >= 0, 'Local PicCap endpoint');
         byId('boot').click();
     },
     function () {

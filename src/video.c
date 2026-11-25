@@ -88,14 +88,18 @@ static int changed(struct c9_rgb old, struct c9_rgb next)
            fabsf(old.b - next.b) > tolerance;
 }
 
-int c9_video_ingest(struct video_region_state *state, const struct capture_bitmap *frame,
-                    struct screen_rect screen, unsigned max_samples, unsigned *samples)
+int c9_video_ingest_picture(struct video_region_state *state, const struct capture_bitmap *frame,
+                            struct bitmap_region picture, struct screen_rect screen,
+                            unsigned max_samples, unsigned *samples)
 {
     struct bitmap_region region;
     unsigned budget;
-    if (!frame || !state || !samples ||
-        !c9_region_grid(frame->width, frame->height, screen, max_samples, &region, &budget))
+    if (!frame || !state || !samples || picture.width > frame->width || picture.height > frame->height ||
+        picture.x > frame->width - picture.width || picture.y > frame->height - picture.height ||
+        !c9_region_grid(picture.width, picture.height, screen, max_samples, &region, &budget))
         return 0;
+    region.x += picture.x;
+    region.y += picture.y;
     struct bitmap_result result = {0};
     if (budget && !analyze_region(frame, region, budget, &result)) return 0;
     *samples = result.samples;
@@ -108,6 +112,14 @@ int c9_video_ingest(struct video_region_state *state, const struct capture_bitma
         state->average = average;
     }
     return 1;
+}
+
+int c9_video_ingest(struct video_region_state *state, const struct capture_bitmap *frame,
+                    struct screen_rect screen, unsigned max_samples, unsigned *samples)
+{
+    if (!frame) return 0;
+    struct bitmap_region full = {0, 0, frame->width, frame->height};
+    return c9_video_ingest_picture(state, frame, full, screen, max_samples, samples);
 }
 
 struct c9_rgb c9_video_tick(struct video_region_state *state, float gain, float fps,

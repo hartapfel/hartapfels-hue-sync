@@ -8,6 +8,7 @@
       {"name": "pair", "public": true},
       {"name": "areas", "public": true},
       {"name": "select", "public": true},
+      {"name": "setSource", "public": true},
       {"name": "start", "public": true},
       {"name": "stop", "public": true},
       {"name": "setAutoStart", "public": true},

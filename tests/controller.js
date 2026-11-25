@@ -30,6 +30,7 @@ var session = {
         assert.equal(keys.clientKey, 'stream-test');
         assert.equal(id, room.id);
         assert.equal(capture.fps, 30);
+        assert.equal(capture.source, 'direct');
         state = 'streaming';
         return Promise.resolve(this.status());
     },
@@ -49,6 +50,8 @@ setImmediate(function () {
             return rejects(app.start(), /Select/);
         }).then(function () { return app.areas(); })
         .then(function (areas) { assert.deepEqual(areas, [room]); return app.select(room.id); })
+        .then(function (s) { assert.equal(s.source, 'piccap'); return app.setSource('direct'); })
+        .then(function () { return rejects(app.setSource('invalid'), /Unknown/); })
         .then(function () { return app.start(); })
         .then(function () { return rejects(app.pair('b'), /busy/); })
         .then(function () { return app.stop(); })
