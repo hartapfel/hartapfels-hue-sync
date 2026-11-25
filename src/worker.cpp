@@ -264,17 +264,17 @@ int stream_video(Video& video, hue_stream *stream) {
 #ifdef C9_WORKER_TEST
             fixture_tick(now);
 #endif
+            // Music preset envelope coefficients at 30 Hz, adjusted once per tick.
+            static const float attack[] = {.005f,.15f,.8f,1.f}, release[] = {.005f,.02f,.065f,.125f};
+            static const float output_gain[] = {1.5f,1.2f,1.f,1.f};
+            float rise = video.session.music ? c9_temporal_alpha(attack[intensity], fps) : 0.f;
+            float fall = video.session.music ? c9_temporal_alpha(release[intensity], fps) : 0.f;
             for (unsigned i = 0; i < targets.size(); ++i) {
                 if (!(video.session.used & (1u << i))) continue;
                 c9_rgb rgb;
                 if (video.session.music) {
-                    // Music preset channel attack/release coefficients at 30 Hz.
-                    static const float attack[] = {.005f,.15f,.8f,1.f};
-                    static const float release[] = {.005f,.02f,.065f,.125f};
-                    static const float output_gain[] = {1.5f,1.2f,1.f,1.f};
                     auto envelope = [&](float target, double& previous) {
-                        float k = target > previous ? attack[intensity] : release[intensity];
-                        previous += c9_temporal_alpha(k, fps) * (target - previous);
+                        previous += (target > previous ? rise : fall) * (target - previous);
                         return float(std::min(1., previous * gain * output_gain[intensity]));
                     };
                     rgb = {envelope(targets[i].r, music_history[i].red),

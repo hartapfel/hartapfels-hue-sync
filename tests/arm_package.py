@@ -111,6 +111,8 @@ def add_fixture(vm, temp, args):
     direct[3] = dict(config[3], source="direct", width=320, height=180)
     vm.add("fixture/direct-session", bytes((100, 1)) +
            subprocess.check_output(["node", "-e", script, json.dumps(direct)], cwd=temp))
+    if args.pcm_fixture:
+        vm.add("capture-fixture/libdile_audio_pcm.so.1", args.pcm_fixture.read_bytes(), stat.S_IFREG | 0o755)
     if args.chart_reference:
         reference = json.loads(args.chart_reference.read_text())
         for case in reference.get("controls", []):
@@ -213,6 +215,7 @@ def main():
     for name in ("ipk", "assets", "qemu", "flatc", "schema", "runtime"):
         parser.add_argument(name, type=Path)
     parser.add_argument("--test-backend", type=Path, default=ROOT / "build/arm/libc9-test-capture-backend.so")
+    parser.add_argument("--pcm-fixture", type=Path, help="ARM shared library built from tests/pcm_fixture.c")
     parser.add_argument("--desktop-vectors", type=Path, help="Tick vectors from tests/desktop_color.py --arm-vectors")
     parser.add_argument("--chart-reference", type=Path, help="Desktop channel output from tests/desktop_color.py --chart-reference")
     args = parser.parse_args()
@@ -247,6 +250,16 @@ def main():
                 header = b"HueStream" + bytes((2, 0, 0, 0, 0, 0, 0)) + AREA.encode()
                 assert packet == header + bytes.fromhex(case["first"]), (prefix, packet.hex())
                 print(f"{case['name']} at {case['brightnessPercent']}%: all 14 first-frame records matched desktop")
+        if args.pcm_fixture:
+            match = re.search(r"C9-MUSIC-BEGIN\s+([A-Za-z0-9+/=\s]+?)\s+C9-MUSIC-END", log)
+            assert match, "Missing Music fixture"
+            raw = base64.b64decode("".join(match[1].split()), validate=True)
+            assert len(raw) == 4*84 and not any(raw[:84])
+            for band in range(3):
+                frame = raw[(1+band)*84:(2+band)*84]
+                right, left = frame[:3], frame[12:15]
+                assert left[band] > right[band] > 0 and left[band] == max(left), (band, left, right)
+            print("Packaged Music capture passed silence, bass, midrange, treble and stereo positioning.")
         if args.desktop_vectors:
             summary = next(line for line in log.splitlines() if line.startswith("Desktop ticks "))
             assert int(summary.split()[2]) == len(vectors)//40

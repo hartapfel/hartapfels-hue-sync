@@ -9,11 +9,14 @@ function Download($url, $path, $sha256) {
 # The desktop executable is a build-time reference on this disposable runner.
 $reference = 'https://firmware.meethue.com/storage/huesyncwin/83/1c8f080a-e057-4dc8-b34a-c681fbd9df3e/HueSyncInstaller_1.13.1.83.exe'
 Download $reference build/HueSyncInstaller.exe DBC70E4C2D606E02DAF3670286FAE520491809CF9A4A6424537116C61D92337C
-$installer = Start-Process build/HueSyncInstaller.exe -ArgumentList '/s /w /v"/qn REBOOT=ReallySuppress"' -WindowStyle Hidden -Wait -PassThru
-$referenceExe = "$env:ProgramFiles/Hue Sync/HueSync.exe"
-if (!(Test-Path $referenceExe) -or (Get-FileHash $referenceExe).Hash -ne '2b5c0cf7f94bb4b65fce2766586f22cf0dc0023781511945716af8474362b7ad') {
+$image = (New-Item -ItemType Directory -Force build/reference-image).FullName
+$arguments = '/a /s /w /v"/qn TARGETDIR=\"' + $image + '\""'
+$installer = Start-Process build/HueSyncInstaller.exe -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
+$referenceExe = Get-ChildItem $image -Recurse -File -Filter HueSync.exe | Select-Object -First 1
+if (!$referenceExe -or (Get-FileHash $referenceExe.FullName).Hash -ne '2b5c0cf7f94bb4b65fce2766586f22cf0dc0023781511945716af8474362b7ad') {
     throw "Reference installer exited $($installer.ExitCode) without the expected binary"
 }
+"HUE_REFERENCE=$($referenceExe.FullName)" >> $env:GITHUB_ENV
 python -m pip install --disable-pip-version-check --target build/zig-toolchain ziglang==0.13.0
 Download 'https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2' build/mbedtls.tar.bz2 a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
 tar -xf build/mbedtls.tar.bz2 -C build

@@ -38,6 +38,15 @@ test_package() {
     wait "$child" && [ -s acks ] || return 1
     cat chart.out
 
+    if [ -f /capture-fixture/libdile_audio_pcm.so.1 ]; then
+        LD_LIBRARY_PATH=/capture-fixture /capture-fixture/c9-capture-zones music 3>music.raw &
+        music_pid=$!
+        for i in $(seq 1 50); do [ "$(wc -c <music.raw)" = 336 ] && break; sleep .1; done
+        kill -TERM "$music_pid" && wait "$music_pid" || return 1
+        echo C9-MUSIC-BEGIN
+        base64 music.raw
+        echo C9-MUSIC-END
+    fi
     test_stream split || return 1
     test_stream controls || return 1
     if [ -f chart-descriptor ]; then
