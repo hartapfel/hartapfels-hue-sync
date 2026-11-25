@@ -73,7 +73,7 @@ module.exports = function createSession(launch, feed) {
         lastError = null;
         Promise.resolve().then(function () { return client.layout(area); }).then(function (layout) {
             if (s.state === 'stopping') return finish(s, s.failure);
-            var zones = capture.source === 'direct' && !!feed;
+            var zones = (capture.source === 'direct' || capture.mode === 'music') && !!feed;
             if (zones) capture.source = 'zones';
             var descriptor = encode(bridge, keys, layout, capture, 2100);
             s.child = launch(zones);
@@ -152,7 +152,7 @@ module.exports = function createSession(launch, feed) {
                 if (!s.activation) error.code = 'VIDEO_NOT_READY';
                 terminate(s, error);
             }, 45000);
-            if (zones) s.stopFeed = feed.stream(s.child.stdio[4], function (err) { terminate(s, err); });
+            if (zones) s.stopFeed = feed.stream(s.child.stdio[4], function (err) { terminate(s, err); }, capture.mode);
             s.child.stdin.write(s.controls);
             s.child.stdin.write(descriptor, function () { descriptor.fill(0); });
         }).catch(function (err) {

@@ -1,8 +1,8 @@
 {
   "id": "org.webosbrew.c9screensync",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "vendor": "Independent homebrew",
-  "title": "C9 Screen Sync",
+  "title": "Hartapfel's Hue Sync",
   "main": "index.html",
   "type": "web",
   "icon": "icon.png",

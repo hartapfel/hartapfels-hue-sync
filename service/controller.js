@@ -9,9 +9,10 @@ module.exports = function controller(hue, store, session, checkAccess) {
         if (settings.brightness === undefined) settings.brightness = 100;
         if (settings.intensity === undefined) settings.intensity = 1;
         if (!settings.source) settings.source = 'direct';
+        if (!settings.mode) settings.mode = 'video';
     });
     function refreshAccess() {
-        if (!checkAccess || settings.source !== 'direct') return Promise.resolve();
+        if (!checkAccess || (settings.source !== 'direct' && settings.mode !== 'music')) return Promise.resolve();
         return checkAccess().then(function (value) { directAccess = value; });
     }
     function status() {
@@ -19,7 +20,7 @@ module.exports = function controller(hue, store, session, checkAccess) {
         return { state: state.state, error: state.error, bridge: settings.bridge || null,
             paired: Boolean(settings.keys), area: settings.area || null, autoStart: settings.autoStart === true,
             coldBootOnly: !!settings.lastColdBoot,
-            source: settings.source, directAccess: directAccess, brightness: settings.brightness, intensity: settings.intensity };
+            source: settings.source, mode: settings.mode, directAccess: directAccess, brightness: settings.brightness, intensity: settings.intensity };
     }
     function commit(changes) {
         var next = {};
@@ -118,6 +119,12 @@ module.exports = function controller(hue, store, session, checkAccess) {
                 return commit({ source: source }).then(function () { session.clearError(); return status(); });
             });
         },
+        setMode: function (mode) {
+            return edit(function () {
+                if (['video','music','gaming'].indexOf(mode) < 0) throw Error('Unknown sync mode.');
+                return commit({mode:mode});
+            });
+        },
         setPlayback: function (brightness, intensity) {
             return edit(function () {
                 if (brightness !== Math.floor(brightness) || !(brightness >= 0 && brightness <= 100) ||
@@ -134,13 +141,13 @@ module.exports = function controller(hue, store, session, checkAccess) {
                 if (writing) throw Error('Bridge setup is in progress.');
                 var connection = client();
                 if (!settings.area) throw Error('Select an entertainment area first.');
-                if (settings.source === 'direct' && directAccess === false) {
+                if ((settings.source === 'direct' || settings.mode === 'music') && directAccess === false) {
                     var error = Error('Grant Homebrew Channel permission to the Screen Sync capture service, then start sync again.');
                     error.code = 'CAPTURE_ACCESS_DENIED';
                     throw error;
                 }
                 return session.start(connection, settings.bridge, settings.keys, settings.area.id,
-                    { source: settings.source, width: 320, height: 180, fps: 30, matrix: 1, range: 0,
+                    { source: settings.source, mode: settings.mode, width: 320, height: 180, fps: 30, matrix: 1, range: 0,
                       brightness: settings.brightness, intensity: settings.intensity });
             });
         },

@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>C9 Screen Sync</title>
+  <title>Hartapfel's Hue Sync</title>
   <link rel="stylesheet" href="screen.css">
 </head>
 <body>
   <main>
-    <h1>C9 Screen Sync</h1>
+    <h1>Hartapfel's Hue Sync</h1>
     <section class="session">
       <div>
         <h2 id="state">Connecting…</h2>
@@ -17,9 +17,15 @@
       <button id="sync" disabled>Start sync</button>
     </section>
     <section class="setup">
+      <h2 id="modeLabel">Sync mode</h2>
+      <div id="modes" role="group" aria-labelledby="modeLabel">
+        <button data-mode="video" disabled>Video</button>
+        <button data-mode="music" disabled>Music</button>
+        <button data-mode="gaming" disabled>Gaming</button>
+      </div>
       <label for="brightness">Brightness <output id="brightnessValue" for="brightness">100%</output></label>
       <input id="brightness" type="range" min="0" max="100" step="1" value="100" disabled>
-      <h2 id="intensityLabel">Video intensity</h2>
+      <h2 id="intensityLabel">Intensity</h2>
       <div id="intensities" role="group" aria-labelledby="intensityLabel">
         <button data-level="0" disabled>Subtle</button>
         <button data-level="1" disabled>Moderate</button>

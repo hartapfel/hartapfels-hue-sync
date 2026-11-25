@@ -1,0 +1,39 @@
+name: Build webOS IPK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Acquire pinned toolchain and reference
+        shell: pwsh
+        run: ./ci/prepare.ps1
+      - name: Compile ARM workers and package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $root = (Resolve-Path build).Path
+          $env:Path = "$root/zig-toolchain/ziglang;C:/Program Files/LLVM/bin;$env:Path"
+          cmake -S . -B build/arm -G Ninja -DCMAKE_BUILD_TYPE=Release --toolchain cmake/c9-zig.cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "-DPICCAP_SOURCE_DIR=$root/piccap" "-DMBEDTLS_SOURCE_DIR=$root/mbedtls-3.6.7" "-DFLATBUFFERS_INCLUDE_DIR=$root/flatbuffers-595bf0007ab1929570c7671f091313c8fc20644e/include" "-DFLATC_EXECUTABLE=$root/flatc/flatc.exe"
+          cmake --build build/arm --target c9-sync c9-capture-zones --parallel 3
+          foreach ($test in 'autostart','core-boot','session','methods','controller','capture-service','bridge','settings','modes') { node "tests/$test.js" }
+          python package.py --ares-js build/packager/node_modules/@webosose/ares-cli/bin/ares-package.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webos-ipk
+          path: build/ipk/*.ipk
+          if-no-files-found: error

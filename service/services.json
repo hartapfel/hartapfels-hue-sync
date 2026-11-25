@@ -9,6 +9,7 @@
       {"name": "areas", "public": true},
       {"name": "select", "public": true},
       {"name": "setSource", "public": true},
+      {"name": "setMode", "public": true},
       {"name": "setPlayback", "public": true},
       {"name": "start", "public": true},
       {"name": "stop", "public": true},

@@ -24,6 +24,7 @@ PalmServiceBridge.prototype.call = function (uri, raw) {
     else if (method === 'stop') { state.state = 'idle'; state.wakeRetry = false; }
     else if (method === 'setAutoStart') { state.autoStart = p.enabled; state.coldBootOnly = p.enabled; }
     else if (method === 'setSource') state.source = p.source;
+    else if (method === 'setMode') state.mode = p.mode;
     else if (method === 'setPlayback') { state.brightness = p.brightness; state.intensity = p.intensity; }
     else if (method !== 'status') throw Error('Unexpected call ' + method);
     var response = JSON.stringify({returnValue:true,result:result});
@@ -93,6 +94,14 @@ var steps = [
     },
     function () {
         check(byId('brightnessValue').textContent === '42%' && byId('room').textContent.indexOf('Intense') >= 0, 'Playback refresh');
+        document.querySelector('[data-mode="music"]').click();
+    },
+    function () {
+        check(byId('room').textContent.indexOf('Music · Intense') >= 0 && byId('piccap').disabled, 'Music controls');
+        document.querySelector('[data-mode="gaming"]').click();
+    },
+    function () {
+        check(byId('room').textContent.indexOf('Gaming · Intense') >= 0 && byId('sync').textContent === 'Stop sync', 'Gaming switch');
         byId('sync').click();
     },
     function () {

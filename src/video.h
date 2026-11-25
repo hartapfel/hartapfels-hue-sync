@@ -11,6 +11,7 @@ struct video_area {
     struct screen_rect screen;
 };
 const struct video_area *c9_video_areas(void);
+struct screen_rect c9_sample_rect(unsigned zone, int gaming);
 // Bit i is set when the desktop preset's ith room cuboid includes this Hue
 // position. Points on a shared face can belong to more than one area.
 uint32_t c9_video_area_mask(double x, double y, double z);

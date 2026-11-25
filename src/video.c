@@ -25,6 +25,18 @@ const struct video_area *c9_video_areas(void)
     return areas;
 }
 
+struct screen_rect c9_sample_rect(unsigned zone, int gaming)
+{
+    // Single-screen Games Default uses the same room volumes as Video Default.
+    static const struct screen_rect game[C9_VIDEO_AREA_COUNT] = {
+        {.5f,.1f,1,.9f}, {.3f,0,.7f,1}, {0,.1f,.5f,.9f}, {.33f,.3f,.67f,.67f},
+        {.23f,.74f,.77f,1}, {.66f,.62f,1,1}, {.74f,.27f,1,.73f}, {.7f,0,1,.375f},
+        {.6f,0,.9f,.2f}, {.35f,0,.65f,.2f}, {.1f,0,.4f,.2f}, {0,0,.3f,.375f},
+        {0,.27f,.26f,.73f}, {0,.62f,.34f,1}
+    };
+    return gaming ? game[zone] : areas[zone].screen;
+}
+
 uint32_t c9_video_area_mask(double x, double y, double z)
 {
     uint32_t mask = 0;

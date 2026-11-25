@@ -1,6 +1,7 @@
 'use strict';
 
 module.exports = function register(service, app, session) {
+    var changingMode = false, stopGeneration = 0;
     function start() {
         return app.start().then(function () {
             var ended = session.whenEnded();
@@ -22,7 +23,7 @@ module.exports = function register(service, app, session) {
         service.register(name, function (message) {
             var sender = String(message.sender || '').split(' ')[0];
             if (sender !== 'org.webosbrew.c9screensync') {
-                message.respond({ returnValue: false, errorText: 'Open C9 Screen Sync to use this control.' });
+                message.respond({ returnValue: false, errorText: "Open Hartapfel's Hue Sync to use this control." });
                 return;
             }
             Promise.resolve().then(function () { return fn(message.payload || {}); }).then(function (result) {
@@ -45,7 +46,21 @@ module.exports = function register(service, app, session) {
     add('select', function (params) { return app.select(params.id); });
     add('setSource', function (params) { return app.setSource(params.source); });
     add('setPlayback', function (p) { return app.setPlayback(p.brightness, p.intensity); });
-    add('start', start);
-    add('stop', function () { var stopped = app.stop(); return Promise.all([stopped,boot.manualStop()]).then(function (r) { return r[0]; }); });
+    add('setMode', function (p) {
+        if (['video','music','gaming'].indexOf(p.mode) < 0 || changingMode) throw Error('Invalid or pending mode change.');
+        changingMode = true;
+        var token = stopGeneration;
+        return app.status().then(function (s) {
+            if (s.mode === p.mode) return s;
+            if (s.state === 'idle') return app.setMode(p.mode);
+            if (s.state !== 'streaming') throw Error('Sync is starting or stopping.');
+            return app.stop().then(function () { return app.setMode(p.mode); }).then(function (updated) {
+                return token === stopGeneration ? start() : updated;
+            });
+        }).then(function (s) { changingMode = false; return s; },
+            function (err) { changingMode = false; throw err; });
+    });
+    add('start', function () { if (changingMode) throw Error('Switching sync mode.'); return start(); });
+    add('stop', function () { ++stopGeneration; var stopped = app.stop(); return Promise.all([stopped,boot.manualStop()]).then(function (r) { return r[0]; }); });
     add('setAutoStart', function (params) { return boot.set(params.enabled); });
 };

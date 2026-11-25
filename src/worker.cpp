@@ -41,6 +41,7 @@ int cancelled(void *) { return stopping.load(std::memory_order_relaxed); }
 struct Session {
     capture_settings capture{};
     uint8_t source{}; // 0: in-process DILE, 1: PicCap TCP, 2: private zone pipe
+    bool gaming = false, music = false;
     char host[64]{}, area[37]{}, identity[129]{};
     uint8_t key[16]{}, ids[256]{};
     uint16_t port{}, count{};
@@ -53,6 +54,8 @@ struct Session {
 struct Preset { float lightness, chroma; unsigned threshold; };
 // AppMode.Video.Presets in Hue Sync Desktop 1.13.1.83.
 constexpr Preset presets[] = {{.005f,.15f,5}, {.025f,.30f,2}, {.07f,.5f,1}, {.5f,.5f,0}};
+
+constexpr Preset gaming_presets[] = {{.005f,.30f,0}, {.025f,.30f,0}, {.07f,.5f,0}, {.5f,.5f,0}};
 
 bool read_controls(uint8_t& brightness, uint8_t& intensity) {
     uint8_t pair[2];
@@ -82,7 +85,12 @@ bool read_session(Session& session) {
     uint8_t h[17];
     if (!read_bytes(h, sizeof(h)) || std::memcmp(h, "C9S2", 4) ||
         h[11] > YUV_BT2020_NCL || h[12] > YUV_FULL ||
-        !read_bytes(&session.source, 1) || session.source > 2) return false;
+        !read_bytes(&session.source, 1)) return false;
+    unsigned mode = session.source >> 2;
+    session.source &= 3;
+    session.gaming = mode == 1;
+    session.music = mode == 2;
+    if (mode > 2 || session.source > 2 || (session.music && session.source != 2)) return false;
     session.port = u16(h + 4);
     session.capture = {u16(h + 6), u16(h + 8), h[10], yuv_matrix(h[11]), yuv_range(h[12])};
     session.count = u16(h + 13);
@@ -147,7 +155,7 @@ int receive_zones(Video& video) {
         if (filled != sizeof(frame)) continue;
         filled = 0;
         Targets next{};
-        unsigned threshold = presets[video.intensity.load()].threshold;
+        unsigned threshold = video.session.gaming || video.session.music ? 0 : presets[video.intensity.load()].threshold;
         for (unsigned i = 0; i < next.size(); ++i) {
             if (!(video.session.used & (1u << i))) continue;
             bitmap_result sample{};
@@ -167,14 +175,14 @@ int receive_zones(Video& video) {
 int ingest(const capture_bitmap *frame, void *context) {
     auto& video = *static_cast<Video *>(context);
     Targets next{};
-    const auto *areas = c9_video_areas();
+    bool gaming = video.session.gaming;
     bitmap_region picture;
     if (!c9_active_picture(&video.bars, frame, &picture)) return -1;
-    unsigned threshold = presets[video.intensity.load()].threshold;
+    unsigned threshold = gaming ? 0 : presets[video.intensity.load()].threshold;
     for (unsigned i = 0; i < next.size(); ++i) {
         if (!(video.session.used & (1u << i))) continue;
         unsigned samples;
-        if (!c9_video_ingest_preset(&video.regions[i], frame, picture, areas[i].screen, 5000, &samples, threshold)) return -1;
+        if (!c9_video_ingest_preset(&video.regions[i], frame, picture, c9_sample_rect(i, gaming), 5000, &samples, threshold)) return -1;
         next[i] = video.regions[i].trimean;
     }
     publish(video, next);
@@ -214,7 +222,7 @@ int stream_video(Video& video, hue_stream *stream) {
     auto started = Clock::now(), next_tick = started, next_send = started;
     Clock::time_point previous_tick{};
     c9_lab history[C9_VIDEO_AREA_COUNT]{};
-    c9_area_color layers[C9_VIDEO_AREA_COUNT]{};
+    c9_area_color layers[C9_VIDEO_AREA_COUNT]{}, music_history[C9_VIDEO_AREA_COUNT]{};
     hue_channel_rgb channels[256]{};
     bool ready = false;
     uint8_t brightness = video.session.brightness, intensity = video.session.intensity;
@@ -250,7 +258,7 @@ int stream_video(Video& video, hue_stream *stream) {
                 if (!read_controls(brightness, intensity)) return 1;
                 video.intensity.store(intensity);
             }
-            const auto& preset = presets[intensity];
+            const auto& preset = video.session.gaming ? gaming_presets[intensity] : presets[intensity];
             float gain = c9_streaming_brightness_gain(brightness);
             auto alpha = c9_video_smoothing(fps, preset.lightness, preset.chroma);
 #ifdef C9_WORKER_TEST
@@ -258,7 +266,23 @@ int stream_video(Video& video, hue_stream *stream) {
 #endif
             for (unsigned i = 0; i < targets.size(); ++i) {
                 if (!(video.session.used & (1u << i))) continue;
-                c9_rgb rgb = c9_video_moderate_apply(targets[i], &history[i], gain, alpha, 1);
+                c9_rgb rgb;
+                if (video.session.music) {
+                    // Music preset channel attack/release coefficients at 30 Hz.
+                    static const float attack[] = {.005f,.15f,.8f,1.f};
+                    static const float release[] = {.005f,.02f,.065f,.125f};
+                    static const float output_gain[] = {1.5f,1.2f,1.f,1.f};
+                    auto envelope = [&](float target, double& previous) {
+                        float k = target > previous ? attack[intensity] : release[intensity];
+                        previous += c9_temporal_alpha(k, fps) * (target - previous);
+                        return float(std::min(1., previous * gain * output_gain[intensity]));
+                    };
+                    rgb = {envelope(targets[i].r, music_history[i].red),
+                           envelope(targets[i].g, music_history[i].green),
+                           envelope(targets[i].b, music_history[i].blue)};
+                } else {
+                    rgb = c9_video_moderate_apply(targets[i], &history[i], gain, alpha, 1);
+                }
                 if (!brightness) rgb = {};
                 layers[i] = {rgb.r, rgb.g, rgb.b, 1.};
             }

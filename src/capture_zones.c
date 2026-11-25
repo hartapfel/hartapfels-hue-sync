@@ -6,6 +6,10 @@
 #include <signal.h>
 #include <sys/prctl.h>
 #include <unistd.h>
+#include <string.h>
+#include "music.h"
+
+static int gaming;
 
 static volatile sig_atomic_t stopping;
 static void stop(int signal_number) { (void)signal_number; stopping = 1; }
@@ -18,7 +22,7 @@ static int sample(const struct capture_bitmap *frame, void *context)
     uint8_t zones[C9_ZONE_BYTES];
     for (unsigned i = 0; i < C9_VIDEO_AREA_COUNT; ++i) {
         struct bitmap_result result;
-        if (!c9_video_sample(frame, picture, c9_video_areas()[i].screen, 5000, &result)) return -1;
+        if (!c9_video_sample(frame, picture, c9_sample_rect(i, gaming), 5000, &result)) return -1;
         for (unsigned k = 0; k < 3; ++k) {
             zones[6*i + k] = (uint8_t)result.average[k];
             zones[6*i + 3 + k] = (uint8_t)result.trimean[k];
@@ -36,12 +40,14 @@ static int sample(const struct capture_bitmap *frame, void *context)
 
 int main(int argc, char **argv)
 {
-    (void)argv;
-    if (argc != 1) return 2;
+    gaming = argc == 2 && strcmp(argv[1], "gaming") == 0;
+    int music = argc == 2 && strcmp(argv[1], "music") == 0;
+    if (argc != 1 && !gaming && !music) return 2;
     signal(SIGTERM, stop);
     signal(SIGINT, stop);
     signal(SIGPIPE, SIG_IGN);
     if (prctl(PR_SET_PDEATHSIG, SIGTERM) || getppid() == 1) return 1;
+    if (music) return c9_capture_music(&stopping);
     struct c9_bar_detector bars;
     c9_bars_init(&bars);
     const struct capture_settings settings = {320, 180, 30, YUV_BT709, YUV_LIMITED};

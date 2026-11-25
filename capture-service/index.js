@@ -5,7 +5,7 @@ var executable = require('path').join(__dirname, 'c9-capture-zones');
 var fs = require('fs');
 require('./capture')(service, function (done) {
     fs.access('/dev/mem', fs.R_OK | fs.W_OK, function (err) { done(!err); });
-}, function () {
-    return require('child_process').spawn(executable, [], {stdio:['ignore','ignore','ignore','pipe']});
+}, function (mode) {
+    return require('child_process').spawn(executable, mode === 'video' ? [] : [mode], {stdio:['ignore','ignore','ignore','pipe']});
 });
 require('./boot')(service);

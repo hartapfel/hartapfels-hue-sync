@@ -1,4 +1,12 @@
-# C9 Screen Sync
+# Hartapfel's Hue Sync
+
+Standalone Hue Entertainment sync for the LG C9. Install the webOS IPK from Releases. Upgrading from C9 Screen Sync preserves the package identity, bridge pairing, entertainment area and startup preference. The first launch defaults to Video.
+
+* **Video** samples the picture using the desktop Video Default regions.
+* **Gaming** uses the desktop Games Default regions and four game intensity presets. Small color changes are accepted immediately.
+* **Music** analyzes stereo TV playback locally. Bass, midrange and treble drive the colors, stereo balance distributes them across the room, and intensity controls how fast lights respond. It uses an independent audio visualizer with the desktop music preset envelope coefficients. Availability depends on the firmware's DILE PCM playback tap.
+
+Select a mode while syncing to switch inputs. Brightness and intensity carry across modes.
 
 This standalone webOS project is porting the video path from the locally installed Hue Sync Desktop 1.13.1.83. The target is an LG C9 using local video capture and a Hue Entertainment area. The test IPK includes a TV setup screen, a webOS service and an ARM video capture and streaming worker.
 
@@ -143,7 +151,7 @@ The service's bridge client identifies a bridge by its certificate and bridge ID
 
 ## TV test package
 
-The C9 Screen Sync app has its own webOS package ID, private pairing storage and background service. Enter the bridge IP, press the bridge link button, pair, then choose an existing Entertainment area. Release HyperHDR's Hue stream before choosing Start sync. Closing the setup screen leaves the session running. Reopen the app to stop it.
+The app has its own webOS package ID, private pairing storage and background service. Enter the bridge IP, press the bridge link button, pair, then choose an existing Entertainment area. Release HyperHDR's Hue stream before choosing Start sync. Closing the setup screen leaves the session running. Reopen the app to stop it.
 
 **Brightness** adjusts all lights together from 0 to 100%. Version 0.5.2 follows the streaming slider in Hue Sync Desktop 1.13.1.83. Its gain is 1× at 50%, 2.5× at 75%, and 4× at 100%. The video filter applies the gain to each region and limits its strongest RGB channel to full scale. Zero mutes the lights while capture continues. Saved percentages carry forward on upgrade. Set 50% for the brightness that 0.5.1 produced at 100%.
 

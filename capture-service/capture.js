@@ -27,6 +27,8 @@ module.exports = function register(service, access, launch) {
     service.register('frames', function (msg) {
         if (!allowed(msg) || !msg.isSubscription)
             return reject(msg, -1, 'Capture requires a Screen Sync session.');
+        var mode = msg.payload && msg.payload.mode || 'video';
+        if (['video','gaming','music'].indexOf(mode) < 0) return reject(msg, -1, 'Invalid capture mode.');
         if (current) return reject(msg, -2, 'The previous capture session is still active.');
         var s = {token:msg.uniqueToken, frames:0}, pending = new Buffer(0);
         current = s;
@@ -36,14 +38,14 @@ module.exports = function register(service, access, launch) {
                 current = null;
                 return reject(msg, 77, 'Grant Homebrew Channel capture permission to the Screen Sync capture service.');
             }
-            try { s.child = launch(); }
+            try { s.child = launch(mode); }
             catch (err) { current = null; return reject(msg, -3, 'Could not launch native capture.'); }
             s.child.on('error', function () { /* close follows spawn failure */ });
             s.child.on('close', function () {
                 clearTimeout(s.killTimer);
                 if (current !== s) return;
                 current = null;
-                if (!s.stopping) reject(msg, -3, 'LG capture stopped. Check the video input and pause competing capture.');
+                if (!s.stopping) reject(msg, -3, mode === 'music' ? 'TV playback audio capture stopped or is unavailable.' : 'LG capture stopped. Check the video input and pause competing capture.');
             });
             s.child.stdio[3].on('error', function () {
                 reject(msg, -3, 'Lost the native capture pipe.');

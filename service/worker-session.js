@@ -27,6 +27,9 @@ function encode(bridge, keys, area, capture, port) {
     out[15] = bridge.host.length;
     out[16] = keys.applicationKey.length;
     out[17] = capture.source === 'piccap' ? 1 : capture.source === 'zones' ? 2 : 0;
+    if (capture.mode === 'gaming') out[17] |= 4;
+    else if (capture.mode === 'music' && capture.source === 'zones') out[17] |= 8;
+    else if (capture.mode && capture.mode !== 'video') throw Error('Invalid mode or capture source.');
     var offset = 18;
     [bridge.host, keys.applicationKey, area.id].forEach(function (value) {
         offset += out.write(value, offset, value.length, 'ascii');

@@ -46,7 +46,7 @@ if(PICCAP_SOURCE_DIR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_library(c9-test-capture-backend SHARED EXCLUDE_FROM_ALL tests/direct_backend.c)
   target_include_directories(c9-test-capture-backend PRIVATE src
     "${PICCAP_SOURCE_DIR}/unicapture" "${PICCAP_SOURCE_DIR}/src")
-  add_executable(c9-capture-zones src/capture_zones.c src/capture.c ${processing_sources})
+  add_executable(c9-capture-zones src/capture_zones.c src/music.c src/capture.c ${processing_sources})
   target_include_directories(c9-capture-zones PRIVATE src "${PICCAP_SOURCE_DIR}/unicapture" "${PICCAP_SOURCE_DIR}/src")
   target_link_libraries(c9-capture-zones PRIVATE m rt ${CMAKE_DL_LIBS})
   set_target_properties(c9-capture-zones PROPERTIES ENABLE_EXPORTS ON C_STANDARD 11)

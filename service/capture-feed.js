@@ -15,8 +15,8 @@ module.exports = function captureFeed(service) {
                 });
             });
         },
-        stream: function (pipe, failed) {
-            var sub = service.subscribe(base + 'frames', {subscribe:true});
+        stream: function (pipe, failed, mode) {
+            var sub = service.subscribe(base + 'frames', {subscribe:true,mode:mode || 'video'});
             var closed = false, blocked = false;
             pipe.on('drain', function () { blocked = false; });
             function lost(message, code) {

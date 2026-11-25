@@ -6,6 +6,13 @@
     var levels = ['Subtle', 'Moderate', 'High', 'Intense'];
     var brightness = 100, intensity = 1, saving = false, saveTimer, editVersion = 0;
     var levelButtons = el('intensities').querySelectorAll('button');
+    var modes = {video:'Video',music:'Music',gaming:'Gaming'};
+    var modeButtons = el('modes').querySelectorAll('button');
+    Array.prototype.forEach.call(modeButtons, function (btn) {
+        btn.onclick = function () {
+            action(function () { return call('setMode', {mode:btn.getAttribute('data-mode')}).then(update); }, btn);
+        };
+    });
     function renderControls() {
         el('brightness').value = brightness;
         el('brightnessValue').textContent = brightness + '%';
@@ -14,7 +21,12 @@
             btn.disabled = !state;
             btn.setAttribute('aria-pressed', String(i === intensity));
         });
-        el('room').textContent = (state && state.area ? state.area.name + ' · ' : '') + 'Video · ' + levels[intensity];
+        var mode = state && state.mode || 'video';
+        Array.prototype.forEach.call(modeButtons, function (btn) {
+            btn.disabled = pending || !state || (state.state !== 'idle' && state.state !== 'streaming');
+            btn.setAttribute('aria-pressed', String(btn.getAttribute('data-mode') === mode));
+        });
+        el('room').textContent = (state && state.area ? state.area.name + ' · ' : '') + modes[mode] + ' · ' + levels[intensity];
     }
     function saveControls() {
         clearTimeout(saveTimer); saveTimer = null;
@@ -77,7 +89,7 @@
             streaming: 'Syncing', stopping: 'Stopping sync…' };
         var waiting = idle && s.wakeRetry;
         var canStop = live || waiting || s.state === 'starting';
-        var directDenied = s.source === 'direct' && s.directAccess === false;
+        var directDenied = (s.source === 'direct' || s.mode === 'music') && s.directAccess === false;
         el('state').textContent = idle && directDenied ? 'Direct capture needs permission' :
             waiting ? 'Waiting to retry sync…' : labels[s.state] || 'Connecting…';
         renderControls();
@@ -90,10 +102,10 @@
         el('boot').textContent = (s.coldBootOnly ? 'Start sync on cold boot' : 'Start sync on power-on') +
             ' · ' + (s.autoStart ? 'On' : 'Off');
         ['piccap', 'direct'].forEach(function (source) {
-            el(source).disabled = pending || !idle;
+            el(source).disabled = pending || !idle || s.mode === 'music';
             el(source).setAttribute('aria-pressed', String(s.source === source));
         });
-        el('sourceHelp').textContent = s.source === 'piccap' ?
+        el('sourceHelp').textContent = s.mode === 'music' ? 'Music uses TV playback audio.' : s.source === 'piccap' ?
             'In PicCap, turn off Unix socket mode and send video to 127.0.0.1 on port 19401. Leave PicCap capture running.' :
             s.source === 'direct' && s.directAccess === false ?
                 'Grant Homebrew Channel permission to the Screen Sync capture service. The status updates when capture is available.' :
