@@ -1,6 +1,6 @@
 'use strict';
 var frameSize = 84;
-module.exports = function register(service, access, launch) {
+module.exports = function register(service, access, launch, power) {
     var current;
     function allowed(message) {
         return message.sender === 'org.webosbrew.c9screensync.service';
@@ -14,7 +14,8 @@ module.exports = function register(service, access, launch) {
         // No keys, image samples or addresses in this diagnostic.
         access(function (ok) {
             msg.respond({returnValue:true, deviceAccess:ok, active:!!(current && current.child),
-                frames:current ? current.frames : 0});
+                frames:current ? current.frames : 0, changedFrames:current ? current.changed : 0,
+                graphicsVisible:current ? current.graphics : null, power:power ? power() : null});
         });
     });
     function stop(s) {
@@ -30,7 +31,7 @@ module.exports = function register(service, access, launch) {
         var mode = msg.payload && msg.payload.mode || 'video';
         if (['video','gaming','music'].indexOf(mode) < 0) return reject(msg, -1, 'Invalid capture mode.');
         if (current) return reject(msg, -2, 'The previous capture session is still active.');
-        var s = {token:msg.uniqueToken, frames:0}, pending = new Buffer(0);
+        var s = {token:msg.uniqueToken, frames:0, changed:0, graphics:null}, pending = new Buffer(0);
         current = s;
         access(function (ok) {
             if (current !== s || s.stopping) return;
@@ -40,6 +41,11 @@ module.exports = function register(service, access, launch) {
             }
             try { s.child = launch(mode); }
             catch (err) { current = null; return reject(msg, -3, 'Could not launch native capture.'); }
+            if (s.child.stderr) {
+                require('readline').createInterface({input:s.child.stderr}).on('line', function (line) {
+                    if (/^graphics-visible=[01]$/.test(line)) s.graphics = line.slice(-1) === '1';
+                });
+            }
             s.child.on('error', function () { /* close follows spawn failure */ });
             s.child.on('close', function () {
                 clearTimeout(s.killTimer);
@@ -57,6 +63,9 @@ module.exports = function register(service, access, launch) {
                 var end = bytes.length - bytes.length % frameSize;
                 pending = bytes.slice(end);
                 if (!end) return;
+                var latest = bytes.slice(end-frameSize,end);
+                if (s.previous && Buffer.compare(s.previous, latest) !== 0) ++s.changed;
+                s.previous = latest;
                 s.frames += end / frameSize;
                 if (msg.respond({returnValue:true,subscribed:true,
                         zones:bytes.slice(end-frameSize,end).toString('base64')}) === false) stop(s);

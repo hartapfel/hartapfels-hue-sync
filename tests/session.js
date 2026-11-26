@@ -14,7 +14,7 @@ function rejected(p, pattern) {
     });
 }
 
-function fixture(startArea, behavior, layout) {
+function fixture(startArea, behavior, layout, feed) {
     var f = { launched: 0, activated: 0, released: 0, grants: 0, controls: [] };
     f.session = createSession(function () {
         ++f.launched;
@@ -35,7 +35,7 @@ function fixture(startArea, behavior, layout) {
         child.kill = function () { setImmediate(function () { child.emit('close', null); }); };
         setImmediate(function () { behavior(child); });
         return child;
-    });
+    }, feed);
     f.start = function () {
         return f.session.start({ layout: layout || available, start: function (id) {
             ++f.activated; return startArea(id);
@@ -94,6 +94,28 @@ function tests() {
                 assert.equal(denied.session.status().errorCode, 'CAPTURE_ACCESS_DENIED');
                 denied.session.clearError();
                 assert.strictEqual(denied.session.status().error, null);
+            });
+        }).then(function () {
+            var standby, child, unwatched = 0;
+            var power = {watchPower:function (cb) { standby = cb; return function () { ++unwatched; }; }};
+            var tv = fixture(available, function (worker) {
+                child = worker;
+                child.kill = function () {}; // Driver teardown can outlast network availability.
+                ready(child);
+            }, null, power);
+            return tv.start().then(function () {
+                standby();
+                standby();
+                return new Promise(function (resolve) { setImmediate(resolve); });
+            }).then(function () {
+                assert.equal(tv.released, 1);
+                assert.equal(tv.session.status().state, 'stopping');
+                child.emit('close', 0);
+                return tv.session.whenEnded();
+            }).then(function (s) {
+                assert.equal(s.errorCode, 'TV_STANDBY');
+                assert.equal(unwatched, 1);
+                assert.equal(tv.released, 1);
             });
         }).then(function () {
             var runningChild;

@@ -14,5 +14,7 @@ typedef int (*capture_callback)(const struct capture_bitmap *, void *);
 typedef int (*capture_cancelled)(void *);
 int c9_capture_video(const struct capture_settings *settings, capture_callback consume,
                      void *context, capture_cancelled cancelled);
+int c9_capture_display(const struct capture_settings *settings, capture_callback consume,
+                       void *context, capture_cancelled cancelled);
 int c9_receive_piccap(const struct capture_settings *settings, capture_callback consume,
                       void *context, capture_cancelled cancelled);

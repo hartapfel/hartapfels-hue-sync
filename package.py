@@ -13,6 +13,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent
 BACKEND = "libdile_vt_backend.so"
+GRAPHICS = "libgm_backend.so"
+GRAPHICS_SHA256 = "4895a93689b033811137cb082689244aa2a8c559b695ef166fcdd54844854b1b"
 BACKEND_SHA256 = "2bc6a61c497ad147c8ad12071adae5423cbe2c2921aa6671df68e56d77b937ef"
 
 
@@ -48,7 +50,7 @@ def verify(package, app, service, capture, appid, version):
                     assert json.loads(content) == json.loads(entry.read_bytes()), entry.name
                 else:
                     assert content == entry.read_bytes(), entry.name
-                if entry.name in ("c9-sync", "c9-capture-zones", "libc9_hue_stream.so", BACKEND):
+                if entry.name in ("c9-sync", "c9-capture-zones", "libc9_hue_stream.so", BACKEND, GRAPHICS):
                     assert content[:6] == b"\x7fELF\x01\x01" and struct.unpack_from("<H", content, 18)[0] == 40
                 if entry.name in ("c9-sync", "c9-capture-zones"):
                     assert item.mode & 0o111 == 0o111, oct(item.mode)
@@ -92,6 +94,10 @@ def main():
                 raise ValueError("Expected the DILE backend from the PicCap 0.5.3 release")
             (service / BACKEND).write_bytes(backend)
             (capture / BACKEND).write_bytes(backend)
+            graphics = data.extractfile("usr/palm/services/org.webosbrew.piccap.service/" + GRAPHICS).read()
+            if hashlib.sha256(graphics).hexdigest() != GRAPHICS_SHA256:
+                raise ValueError("Expected the GM backend from the PicCap 0.5.3 release")
+            (capture / GRAPHICS).write_bytes(graphics)
         shutil.copyfile(args.mbedtls / "LICENSE", service / "LICENSE-mbedTLS.txt")
         shutil.copyfile(args.flatbuffers / "LICENSE", service / "LICENSE-FlatBuffers.txt")
         for name in ("libcxx", "libcxxabi", "libunwind"):

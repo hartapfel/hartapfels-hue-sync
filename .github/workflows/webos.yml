@@ -71,7 +71,9 @@ jobs:
           cmake --build build/arm --target c9-sync c9-capture-zones --parallel 3
       - name: Test and package
         run: |
-          for test in autostart core-boot session methods controller capture-service bridge settings modes; do node "tests/$test.js"; done
+          cc -std=c11 -Isrc tests/composite.c src/bitmap.c -lm -o build/test-composite
+          build/test-composite
+          for test in autostart core-boot power session methods controller capture-service bridge settings modes; do node "tests/$test.js"; done
           npm install --prefix build/packager --no-audit --no-fund --ignore-scripts @webosose/ares-cli@2.3.1
           python3 package.py --ares-js build/packager/node_modules/@webosose/ares-cli/bin/ares-package.js
       - uses: actions/upload-artifact@v4

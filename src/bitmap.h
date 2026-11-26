@@ -2,7 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum pixel_layout { RGBX8, BGRX8, RGB10A2, RGB24, NV12, NV16 };
+enum pixel_layout { RGBX8, BGRX8, RGB10A2, RGB24, NV12, NV16, COMPOSITED_BGRA };
 enum yuv_matrix { YUV_BT601, YUV_BT709, YUV_BT2020_NCL };
 enum yuv_range { YUV_LIMITED, YUV_FULL };
 
@@ -17,6 +17,7 @@ struct capture_bitmap {
     struct bitmap_plane pixels, chroma;
     enum yuv_matrix matrix;
     enum yuv_range range;
+    const struct capture_bitmap *background; // Optional video underneath premultiplied GM graphics.
 };
 
 struct bitmap_region { unsigned x, y, width, height; };

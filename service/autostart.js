@@ -79,7 +79,7 @@ module.exports = function autoStart(service, app, session, start, readBoot) {
             lastError = err.message;
             if (coreHold) console.log('Screen Sync startup: attempt ' + (attempt + 1) + ' failed (' + (err.code || 'start') + ')');
             var transient = /^(VIDEO_NOT_READY|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ENETDOWN|HTTP_50[234])$/.test(err.code);
-            if (err.code === 'AREA_BUSY' || err.code === 'CAPTURE_ACCESS_DENIED' || (!transient && attempt >= 4)) {
+            if (err.code === 'TV_STANDBY' || err.code === 'AREA_BUSY' || err.code === 'CAPTURE_ACCESS_DENIED' || (!transient && attempt >= 4)) {
                 suppressed = true; releaseCoreHold();
                 return;
             }

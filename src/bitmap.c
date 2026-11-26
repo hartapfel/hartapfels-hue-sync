@@ -52,8 +52,11 @@ static int covers(struct bitmap_plane plane, unsigned rows, unsigned row_bytes)
 static int valid_frame(const struct capture_bitmap *frame)
 {
     if (!frame || !frame->width || !frame->height || frame->width > 16384 || frame->height > 16384 ||
-        (unsigned)frame->layout > NV16)
+        (unsigned)frame->layout > COMPOSITED_BGRA)
         return 0;
+    if (frame->layout == COMPOSITED_BGRA && frame->background &&
+        ((unsigned)frame->background->layout > NV16 || frame->background->layout == RGB10A2 ||
+         !valid_frame(frame->background))) return 0;
 
     const enum pixel_layout layout = frame->layout;
     const int planar = layout == NV12 || layout == NV16;
@@ -69,7 +72,7 @@ static int valid_frame(const struct capture_bitmap *frame)
     return 1;
 }
 
-static inline void pixel(const struct capture_bitmap *frame, unsigned x, unsigned y, unsigned rgb[3])
+static inline void base_pixel(const struct capture_bitmap *frame, unsigned x, unsigned y, unsigned rgb[3])
 {
     enum pixel_layout layout = frame->layout;
     const uint8_t *row = frame->pixels.data + y * frame->pixels.stride;
@@ -92,6 +95,23 @@ static inline void pixel(const struct capture_bitmap *frame, unsigned x, unsigne
         rgb[0] = p[layout == BGRX8 ? 2 : 0];
         rgb[1] = p[1];
         rgb[2] = p[layout == BGRX8 ? 0 : 2];
+    }
+}
+
+static inline void pixel(const struct capture_bitmap *frame, unsigned x, unsigned y, unsigned rgb[3])
+{
+    if (frame->layout != COMPOSITED_BGRA) { base_pixel(frame, x, y, rgb); return; }
+    const uint8_t *ui = frame->pixels.data + y * frame->pixels.stride + 4*x;
+    const struct capture_bitmap *video = frame->background;
+    if (ui[3] != 255 && video) {
+        unsigned vx = frame->width == video->width ? x : x * video->width / frame->width;
+        unsigned vy = frame->height == video->height ? y : y * video->height / frame->height;
+        base_pixel(video, vx, vy, rgb);
+    } else rgb[0] = rgb[1] = rgb[2] = 0;
+    // libyuv ARGBBlend uses premultiplied foreground and 256-based inverse alpha.
+    for (unsigned k = 0; k < 3; ++k) {
+        unsigned value = ui[2-k] + ((256u - ui[3]) * rgb[k] >> 8);
+        rgb[k] = value > 255 ? 255 : value;
     }
 }
 

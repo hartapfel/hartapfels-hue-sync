@@ -2,6 +2,27 @@
 var base = 'luna://org.webosbrew.c9screensync.capture/';
 module.exports = function captureFeed(service) {
     return {
+        watchPower: function (onStandby) {
+            var sub, retry, closed = false;
+            function connect() {
+                var mine = service.subscribe(base + 'watchPower', {subscribe:true});
+                sub = mine;
+                function lost() {
+                    if (closed || sub !== mine) return;
+                    sub = null;
+                    mine.cancel();
+                    retry = setTimeout(connect, 5000);
+                }
+                mine.on('response', function (msg) {
+                    if (closed || sub !== mine) return;
+                    if (!msg.payload || !msg.payload.returnValue) return lost();
+                    if (msg.payload.standby) onStandby();
+                });
+                mine.on('cancel', lost);
+            }
+            connect();
+            return function () { closed = true; clearTimeout(retry); if (sub) sub.cancel(); };
+        },
         access: function () {
             return new Promise(function (resolve) {
                 // A pending LS2 call alone does not keep the C9's Node loop alive.

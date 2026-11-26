@@ -30,6 +30,18 @@ module.exports = function createSession(launch, feed) {
         if (s.stopFeed) { var cancel = s.stopFeed; s.stopFeed = null; cancel(); }
     }
 
+    function releaseArea(s) {
+        if (!s.activation) return Promise.resolve();
+        if (!s.release) {
+            var release = function () { return s.client.stop(s.area); };
+            s.release = s.activation.then(release, function (err) {
+                if (!err || err.code !== 'AREA_BUSY') return release();
+            });
+            s.release.catch(function () {}); // finish reports release errors after the worker exits.
+        }
+        return s.release;
+    }
+
     function finish(s, error) {
         if (s.finishing) return;
         s.finishing = true;
@@ -44,17 +56,15 @@ module.exports = function createSession(launch, feed) {
             if (!s.ready) s.start.reject(reason || new Error('Start cancelled.'));
             s.end.resolve(status());
         }
-        if (!s.activation || (error && error.code === 'AREA_BUSY')) return done(null);
-        // The worker may exit while the activation request is in flight. Let
-        // it settle before checking ownership, including after an HTTP timeout.
-        function release() { return s.client.stop(s.area); }
-        s.activation.then(release, release).then(function () { done(null); }, done);
+        if (s.unwatch) s.unwatch();
+        releaseArea(s).then(function () { done(null); }, done);
     }
 
     function terminate(s, error) {
         if (s.finishing || s.state === 'stopping') return;
         s.state = 'stopping';
         s.failure = error;
+        releaseArea(s);
         stopFeed(s);
         clearTimeout(s.deadline);
         if (s.child) {
@@ -71,6 +81,11 @@ module.exports = function createSession(launch, feed) {
                                  capture.intensity === undefined ? 1 : capture.intensity]);
         current = s;
         lastError = null;
+        if (feed && feed.watchPower) s.unwatch = feed.watchPower(function () {
+            var err = Error('TV entered standby.');
+            err.code = 'TV_STANDBY';
+            terminate(s, err);
+        });
         Promise.resolve().then(function () { return client.layout(area); }).then(function (layout) {
             if (s.state === 'stopping') return finish(s, s.failure);
             var zones = (capture.source === 'direct' || capture.mode === 'music') && !!feed;

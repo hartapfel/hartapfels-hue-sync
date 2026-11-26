@@ -51,5 +51,5 @@ int main(int argc, char **argv)
     struct c9_bar_detector bars;
     c9_bars_init(&bars);
     const struct capture_settings settings = {320, 180, 30, YUV_BT709, YUV_LIMITED};
-    return c9_capture_video(&settings, sample, &bars, cancelled) == 0 ? 0 : 1;
+    return c9_capture_display(&settings, sample, &bars, cancelled) == 0 ? 0 : 1;
 }

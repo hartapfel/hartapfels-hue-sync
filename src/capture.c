@@ -60,80 +60,129 @@ static int borrow_bitmap(const frame_info_t *source, const struct capture_settin
            borrow_plane(&frame->chroma, source, 1, rows, (frame->width + 1) / 2 * 2);
 }
 
-int c9_capture_video(const struct capture_settings *settings, capture_callback consume,
-                     void *context, capture_cancelled cancelled)
+struct layer {
+    void *library;
+    capture_backend_t api;
+    int started;
+};
+
+static int close_layer(struct layer *layer)
+{
+    int result = 0;
+    if (layer->started && layer->api.terminate(layer->api.state) != 0) result = -1;
+    if (layer->api.state && layer->api.cleanup(layer->api.state) != 0) result = -1;
+    if (layer->library) dlclose(layer->library);
+    *layer = (struct layer){0};
+    return result;
+}
+
+static int open_layer(struct layer *layer, const char *path, cap_backend_config_t *config)
+{
+    layer->library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!layer->library) {
+        fprintf(stderr, "C9 %s backend: %s\n", config->no_gui ? "video" : "graphics", dlerror());
+        return 0;
+    }
+    capture_backend_t *a = &layer->api;
+    a->init = (capture_init_t)dlsym(layer->library, "capture_init");
+    a->start = (capture_start_t)dlsym(layer->library, "capture_start");
+    a->wait = (capture_wait_t)dlsym(layer->library, "capture_wait");
+    a->acquire_frame = (capture_acquire_frame_t)dlsym(layer->library, "capture_acquire_frame");
+    a->release_frame = (capture_release_frame_t)dlsym(layer->library, "capture_release_frame");
+    a->terminate = (capture_terminate_t)dlsym(layer->library, "capture_terminate");
+    a->cleanup = (capture_cleanup_t)dlsym(layer->library, "capture_cleanup");
+    if (a->init && a->start && a->wait && a->acquire_frame && a->release_frame && a->terminate && a->cleanup) {
+        void *state = NULL;
+        if (a->init(config, &state) == 0) {
+            a->state = state;
+            if (a->start(state) == 0) {
+                layer->started = 1;
+                return 1;
+            }
+        }
+    }
+    fprintf(stderr, "Could not initialize %s capture\n", path);
+    close_layer(layer);
+    return 0;
+}
+
+static int capture(const struct capture_settings *settings, capture_callback consume,
+                   void *context, capture_cancelled cancelled, int display)
 {
     if (!settings || !consume || !cancelled || !settings->width || settings->width > 16384 ||
         !settings->height || settings->height > 16384 || !settings->fps || settings->fps > 60 ||
-        (unsigned)settings->matrix > YUV_BT2020_NCL || (unsigned)settings->range > YUV_FULL)
-        return -1;
-    // The capture backend is installed beside the worker in its own service.
-    void *library = dlopen("$ORIGIN/libdile_vt_backend.so", RTLD_NOW | RTLD_LOCAL);
-    if (!library) {
-        fprintf(stderr, "C9 video backend: %s\n", dlerror());
-        return -1;
-    }
-    capture_backend_t api = {0};
-    api.init = (capture_init_t)dlsym(library, "capture_init");
-    api.start = (capture_start_t)dlsym(library, "capture_start");
-    api.wait = (capture_wait_t)dlsym(library, "capture_wait");
-    api.acquire_frame = (capture_acquire_frame_t)dlsym(library, "capture_acquire_frame");
-    api.release_frame = (capture_release_frame_t)dlsym(library, "capture_release_frame");
-    api.terminate = (capture_terminate_t)dlsym(library, "capture_terminate");
-    api.cleanup = (capture_cleanup_t)dlsym(library, "capture_cleanup");
-    int status = -1;
-    if (!api.init || !api.start || !api.wait || !api.acquire_frame ||
-        !api.release_frame || !api.terminate || !api.cleanup) {
-        fputs("Incomplete video backend ABI\n", stderr);
-        goto close_library;
-    }
+        (unsigned)settings->matrix > YUV_BT2020_NCL || (unsigned)settings->range > YUV_FULL) return -1;
     cap_backend_config_t config = {0};
     config.resolution_width = (int)settings->width;
     config.resolution_height = (int)settings->height;
     config.fps = (int)settings->fps;
-    config.no_gui = true;
     config.quirks = QUIRK_DILE_VT_CREATE_EX;
-    int init_result = api.init(&config, &api.state);
-    if (init_result != 0) {
-        fprintf(stderr, "DILE capture initialization failed (%d)\n", init_result);
-        if (access("/dev/mem", R_OK | W_OK) != 0 && (errno == EACCES || errno == EPERM))
-            fputs("DILE capture device access denied\n", stderr);
-        goto close_library;
-    }
-    if (api.start(api.state) != 0) {
-        fputs("DILE capture start failed\n", stderr);
-        goto cleanup;
-    }
-    status = 0;
-    const uint64_t interval_us = (1000000u + settings->fps - 1) / settings->fps;
-    uint64_t next_sample_us = 0;
+    struct layer ui = {0}, video = {0};
+    if (display) open_layer(&ui, "$ORIGIN/libgm_backend.so", &config);
+    config.no_gui = true;
+    open_layer(&video, "$ORIGIN/libdile_vt_backend.so", &config);
+    int status = 0;
+    const uint64_t interval = (1000000u + settings->fps - 1) / settings->fps;
+    uint64_t next_sample = 0, retry_video = getticks_us() + 1000000, next_probe = 0;
+    int visible = -1;
     while (!cancelled(context)) {
-        frame_info_t source = {0};
-        if (api.wait(api.state) != 0) { status = -1; break; }
-        // C9 firmware can signal every display refresh despite the DILE divider.
-        // Wait before borrowing the current frame so capture never holds a
-        // frozen buffer during this delay. A slower input needs no extra wait.
+        if (!video.started && !ui.started) { status = -1; break; }
+        // DILE vsync may stop on a graphics-only input. GM supplies its own
+        // current surface so use the capture clock whenever GM is available.
+        if (!ui.started && video.api.wait(video.api.state) != 0) { status = -1; break; }
         uint64_t now = getticks_us();
-        while (now < next_sample_us && !cancelled(context)) {
-            uint64_t remaining = next_sample_us - now;
-            struct timespec delay = {(time_t)(remaining / 1000000u),
-                                     (long)(remaining % 1000000u) * 1000};
-            if (nanosleep(&delay, NULL) != 0 && errno != EINTR) { status = -1; break; }
+        while (now < next_sample && !cancelled(context)) {
+            uint64_t left = next_sample - now;
+            struct timespec delay = {(time_t)(left/1000000), (long)(left%1000000)*1000};
+            if (nanosleep(&delay,NULL) != 0 && errno != EINTR) { status = -1; break; }
             now = getticks_us();
         }
-        if (status != 0) break;
-        if (cancelled(context)) break;
-        next_sample_us = now + interval_us;
-        if (api.acquire_frame(api.state, &source) != 0) { status = -1; break; }
-        struct capture_bitmap frame = {0};
-        int next = borrow_bitmap(&source, settings, &frame) ? consume(&frame, context) : -1;
-        if (api.release_frame(api.state, &source) != 0 || next < 0) { status = -1; break; }
-        if (next > 0) break;
+        if (status || cancelled(context)) break;
+        next_sample = now + interval;
+        if (!video.started && now >= retry_video) {
+            open_layer(&video, "$ORIGIN/libdile_vt_backend.so", &config);
+            retry_video = now + 1000000;
+        }
+        frame_info_t vf = {0}, gf = {0};
+        int have_ui = ui.started && ui.api.acquire_frame(ui.api.state, &gf) == 0;
+        int have_video = video.started && video.api.acquire_frame(video.api.state, &vf) == 0;
+        struct capture_bitmap base = {0}, graphics = {0};
+        const struct capture_bitmap *frame = have_video && borrow_bitmap(&vf,settings,&base) ? &base : NULL;
+        if (have_ui && gf.pixel_format == PIXFMT_ARGB && gf.width > 0 && gf.width <= 16384 &&
+            gf.height > 0 && gf.height <= 16384 && borrow_plane(&graphics.pixels,&gf,0,gf.height,gf.width*4)) {
+            graphics.width = gf.width;
+            graphics.height = gf.height;
+            graphics.layout = COMPOSITED_BGRA;
+            graphics.background = frame;
+            frame = &graphics;
+            if (now >= next_probe) {
+                int found = 0;
+                for (unsigned y = 0; y < graphics.height && !found; y += 4)
+                    for (unsigned x = 0; x < graphics.width && !found; x += 4)
+                        found = graphics.pixels.data[y * graphics.pixels.stride + 4*x + 3] != 0;
+                if (found != visible) fprintf(stderr,"graphics-visible=%d\n", found);
+                visible = found;
+                next_probe = now + 250000;
+            }
+        }
+        int next = frame ? consume(frame,context) : ui.started ? 0 : -1;
+        if (have_video && video.api.release_frame(video.api.state,&vf) != 0) next = -1;
+        if (have_ui && ui.api.release_frame(ui.api.state,&gf) != 0) next = -1;
+        if (next) { status = next < 0 ? -1 : 0; break; }
     }
-    if (api.terminate(api.state) != 0) status = -1;
-cleanup:
-    if (api.cleanup(api.state) != 0) status = -1;
-close_library:
-    dlclose(library);
+    if (close_layer(&video) != 0) status = -1;
+    if (close_layer(&ui) != 0) status = -1;
     return status;
+}
+
+int c9_capture_video(const struct capture_settings *settings, capture_callback consume,
+                     void *context, capture_cancelled cancelled)
+{
+    return capture(settings, consume, context, cancelled, 0);
+}
+
+int c9_capture_display(const struct capture_settings *settings, capture_callback consume,
+                       void *context, capture_cancelled cancelled)
+{
+    return capture(settings, consume, context, cancelled, 1);
 }
